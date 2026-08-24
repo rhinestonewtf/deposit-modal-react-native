@@ -1,0 +1,65 @@
+{
+  "name": "@rhinestone/deposit-modal-react-native",
+  "version": "0.0.0",
+  "description": "React Native wrapper for the Rhinestone deposit modal",
+  "author": "Rhinestone <dev@rhinestone.wtf>",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bun run scripts/sync-version.ts && tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "changeset": "changeset",
+    "changeset:version": "changeset version && bun run scripts/sync-version.ts",
+    "changeset:release": "bun run build && changeset publish",
+    "prepublishOnly": "bun run build && bun run typecheck"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-native": ">=0.73",
+    "react-native-webview": ">=13"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.28.1",
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-test-renderer": "^18.3.0",
+    "react": "^18.3.1",
+    "react-native": "^0.77.0",
+    "react-test-renderer": "^18.3.1",
+    "react-native-webview": "^13.13.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^4.0.10"
+  },
+  "keywords": [
+    "rhinestone",
+    "deposit",
+    "react-native",
+    "webview",
+    "cross-chain"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rhinestonewtf/deposit-modal-react-native.git"
+  }
+}

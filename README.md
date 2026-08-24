@@ -129,3 +129,10 @@ it, so the whole bridge is testable in Node against `src/test/page-double.ts`,
 which runs the injected script rather than reading the frame out of a mock.
 `src/DepositSheet.tsx` is what is left over: presentation, origin pinning, the
 back gesture, and the poll.
+
+The sheet is covered too, against a page double living in a real window
+(`src/test/page-window.ts`): React Native and the web view are mocked, the
+bridge is not, so a component test still crosses the nonce, the encoder and the
+correlation table. That is where the session lifetime is pinned down — a session
+that must survive a parent's re-render, a reload allowance that must not survive
+the session, and a watch that has to follow a config it was not born with.
