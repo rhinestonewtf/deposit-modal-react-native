@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run build
+      # The published version header is how a mobile integration is attributed
+      # at the processor, so a build that did not write it is a build that lies.
+      - name: version literal matches package.json
+        run: |
+          expected=$(node -p "require('./package.json').version")
+          grep -q "WRAPPER_VERSION = \"$expected\"" src/version.ts

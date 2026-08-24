@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "Deposit Modal Example",
+    "slug": "deposit-modal-example",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "dev.rhinestone.depositmodal.example",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "dev.rhinestone.depositmodal.example"
+    }
+  }
+}
