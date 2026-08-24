@@ -381,6 +381,25 @@ describe("pinning the web view", () => {
     expect(shouldLoad({ url: "intent://evil" })).toBe(false);
     expect(openUrl).not.toHaveBeenCalled();
   });
+
+  it("catches the popup path a navigation gate never sees", () => {
+    const openUrl = vi.fn();
+    mount({ openUrl });
+    const onOpenWindow = native.webView.props?.onOpenWindow as (event: {
+      nativeEvent: { targetUrl: string };
+    }) => void;
+
+    // `target="_blank"` and `window.open` arrive here, not at
+    // `onShouldStartLoadWithRequest`.
+    onOpenWindow({ nativeEvent: { targetUrl: "https://basescan.org/tx/0x1" } });
+    expect(openUrl).toHaveBeenCalledWith({ url: "https://basescan.org/tx/0x1" });
+
+    // Our own page popping itself would open a second, bridge-less copy.
+    openUrl.mockClear();
+    onOpenWindow({ nativeEvent: { targetUrl: "https://deposit.rhinestone.dev/x" } });
+    onOpenWindow({ nativeEvent: { targetUrl: "intent://evil" } });
+    expect(openUrl).not.toHaveBeenCalled();
+  });
 });
 
 describe("dismissal", () => {

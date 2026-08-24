@@ -567,6 +567,30 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
     [embedUrl],
   );
 
+  /**
+   * The other way a link leaves the page, and the one a navigation gate never
+   * sees.
+   *
+   * `target="_blank"` and `window.open` do not reach
+   * `onShouldStartLoadWithRequest`: WKWebView asks to create a second web view,
+   * and Android ships `setSupportMultipleWindows` on by default, so both
+   * arrive here instead. Left unhandled they are dead taps — or worse, a child
+   * web view holding a provider page outside the origin gate.
+   *
+   * Our own origin is ignored rather than forwarded: the page has no reason to
+   * pop itself, and answering by opening a second, bridge-less copy of the
+   * deposit page in the system browser is worse than the dead tap.
+   */
+  const onOpenWindow = useCallback(
+    (event: { nativeEvent?: { targetUrl?: string } }) => {
+      const url = event.nativeEvent?.targetUrl;
+      if (typeof url !== "string") return;
+      if (isSameOrigin(url, embedUrl)) return;
+      if (parseHttpsAuthority(url)) latestRef.current.openUrl?.({ url });
+    },
+    [embedUrl],
+  );
+
   return (
     <Modal
       visible={visible}
@@ -589,6 +613,7 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
           injectedJavaScriptBeforeContentLoadedForMainFrameOnly
           onMessage={onMessage}
           onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
+          onOpenWindow={onOpenWindow}
           onError={() =>
             onFatal?.(new Error("The deposit page could not be loaded."))
           }
