@@ -193,6 +193,9 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
   const reloadedRef = useRef(false);
   const pendingDismissRef = useRef(false);
   const [loading, setLoading] = useState(true);
+  // The page's own version, learned at hello. Also the signal that there is a
+  // session to poll alongside.
+  const [modalVersion, setModalVersion] = useState<string | null>(null);
 
   // One per mount. A reload keeps it: the page is the same document from the
   // channel's point of view, and rotating it would only orphan frames in
@@ -344,6 +347,13 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
   useEffect(() => {
     if (!visible) return;
 
+    // Per session, not per mount. A sheet that opened, recovered from an
+    // injection race and closed would otherwise spend its one reload forever:
+    // every later session would report the first timeout as fatal, turning a
+    // transient race into a permanent failure for as long as the component
+    // stays mounted.
+    reloadedRef.current = false;
+
     let settled = false;
     const host = createBridgeHost({
       post: (script) => webViewRef.current?.injectJavaScript(script),
@@ -360,25 +370,10 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
       handlers,
       onHello: ({ modalVersion }) => {
         settled = true;
-        // Only once the page has named itself: the watch's requests carry the
-        // same version header the page's do, so the pair is one client at the
-        // processor rather than two.
-        const recipient = configRef.current.recipient;
-        if (!recipient || watchRef.current) return;
-        const watch = createDepositWatch({
-          backendUrl: configRef.current.backendUrl,
-          recipient,
-          versionHeader: formatVersionHeader(modalVersion, hostIdentity),
-          ...(pollIntervalMs ? { intervalMs: pollIntervalMs } : {}),
-          onSettled: (deposit) => latestRef.current.onDepositSettled?.(deposit),
-          onError: () => {
-            // A poll failure is not the flow's failure — the page is running
-            // its own tracker against the same backend and reports what it
-            // sees. Surfacing this too would double every outage.
-          },
-        });
-        watchRef.current = watch;
-        watch.start();
+        // The watch cannot start before this: its requests carry the same
+        // version header the page's do, so the pair is one client at the
+        // processor rather than two, and only the page can name its half.
+        setModalVersion(modalVersion);
       },
       onEvent: (type, payload) => {
         const callbacks = latestRef.current;
@@ -462,10 +457,50 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
       clearTimeout(timer);
       host.close();
       hostRef.current = null;
-      watchRef.current?.stop();
-      watchRef.current = null;
+      setModalVersion(null);
     };
-  }, [visible, nonce, hostIdentity, handlers, handshakeTimeoutMs, pollIntervalMs]);
+  }, [visible, nonce, hostIdentity, handlers, handshakeTimeoutMs]);
+
+  /**
+   * The watch follows the config, rather than the config it was born with.
+   *
+   * Keyed on the two fields it actually reads. An app that changes `recipient`
+   * while the sheet stays open — switching account behind a live sheet — would
+   * otherwise leave the page starting deposits for one address while the
+   * watcher polled another, and the completion the web view died through would
+   * be missed by the only thing still looking for it.
+   *
+   * Restarting takes a fresh baseline, which is right: what was already
+   * finished for a different account is not this account's news.
+   */
+  useEffect(() => {
+    if (!visible || !modalVersion || !config.recipient) return;
+    const watch = createDepositWatch({
+      backendUrl: config.backendUrl,
+      recipient: config.recipient,
+      versionHeader: formatVersionHeader(modalVersion, hostIdentity),
+      ...(pollIntervalMs ? { intervalMs: pollIntervalMs } : {}),
+      onSettled: (deposit) => latestRef.current.onDepositSettled?.(deposit),
+      onError: () => {
+        // A poll failure is not the flow's failure — the page runs its own
+        // tracker against the same backend and reports what it sees.
+        // Surfacing this too would double every outage.
+      },
+    });
+    watchRef.current = watch;
+    watch.start();
+    return () => {
+      watch.stop();
+      if (watchRef.current === watch) watchRef.current = null;
+    };
+  }, [
+    visible,
+    modalVersion,
+    config.backendUrl,
+    config.recipient,
+    hostIdentity,
+    pollIntervalMs,
+  ]);
 
   // Config is not a mount-time value: appearance can change while the sheet is
   // open, and the page repaints in place without disturbing the flow.
