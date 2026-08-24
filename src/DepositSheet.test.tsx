@@ -382,6 +382,27 @@ describe("pinning the web view", () => {
     expect(openUrl).not.toHaveBeenCalled();
   });
 
+  it("leaves a sub-frame alone", () => {
+    const openUrl = vi.fn();
+    mount({ openUrl });
+    const shouldLoad = native.webView.props?.onShouldStartLoadWithRequest as (
+      request: { url: string; isTopFrame?: boolean },
+    ) => boolean;
+
+    // A frame load is neither a navigation away nor a tapped link. Cancelling
+    // it kills whatever the page embedded, and handing it to the browser is
+    // worse — the payment page would open outside the frame that is waiting
+    // for it.
+    expect(
+      shouldLoad({ url: "https://pay.example/frame", isTopFrame: false }),
+    ).toBe(true);
+    expect(openUrl).not.toHaveBeenCalled();
+
+    // Absent means the main frame: Android never routes a sub-frame here.
+    expect(shouldLoad({ url: "https://pay.example/page" })).toBe(false);
+    expect(openUrl).toHaveBeenCalledOnce();
+  });
+
   it("never lets the web view refuse a URL itself, our own page included", () => {
     mount({ openUrl: vi.fn() });
 

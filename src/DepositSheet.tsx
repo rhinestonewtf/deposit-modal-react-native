@@ -552,7 +552,21 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
    * being a dead tap.
    */
   const onShouldStartLoadWithRequest = useCallback(
-    (request: { url: string; navigationType?: string }) => {
+    (request: {
+      url: string;
+      navigationType?: string;
+      isTopFrame?: boolean;
+    }) => {
+      // Sub-frames are not this gate's business, and treating them as one
+      // breaks the page: a frame load is neither a navigation away from our
+      // origin nor a link the user tapped, so cancelling it kills whatever the
+      // page embedded and handing it to the browser is worse. The wallet seam
+      // is protected from a frame by the nonce, which only the main frame
+      // learns, not by this.
+      //
+      // `isTopFrame` is iOS-only; Android does not route sub-frame loads here
+      // at all, so an absent value means the main frame on both.
+      if (request.isTopFrame === false) return true;
       if (request.url === "about:blank") return true;
       if (isSameOrigin(request.url, embedUrl)) return true;
       if (parseHttpsAuthority(request.url) && latestRef.current.openUrl) {

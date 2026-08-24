@@ -5,7 +5,7 @@
  * browser hand-off that really presents, and the deposit watch running. A demo
  * that stubs the wallet proves the sheet renders and nothing else.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Button, SafeAreaView, StyleSheet, Text, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import * as WebBrowser from "expo-web-browser";
@@ -97,9 +97,13 @@ export default function App() {
   );
   const [status, setStatus] = useState("Idle");
 
+  // Timed from the moment the sheet is asked for, so a slow first paint can be
+  // attributed to the page rather than guessed at.
+  const openedAt = useRef(Date.now());
   const report = (line: string) => {
     setStatus(line);
-    console.log(`[example] ${line}`);
+    const since = openedAt.current ? `+${Date.now() - openedAt.current}ms ` : "";
+    console.log(`[example] ${since}${line}`);
   };
   const wallet = useDemoWallet();
 
@@ -142,7 +146,10 @@ export default function App() {
         <Button
           title="Add funds"
           disabled={!config}
-          onPress={() => setOpen(true)}
+          onPress={() => {
+            openedAt.current = Date.now();
+            setOpen(true);
+          }}
         />
       </View>
 
