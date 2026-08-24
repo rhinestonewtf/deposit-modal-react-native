@@ -49,12 +49,19 @@ import {
   buildChannelScript,
   createSessionNonce,
 } from "./injection";
-import { createBridgeHost, type BridgeHost, type BridgeHostHandlers } from "./host";
+import {
+  createBridgeHost,
+  HostError,
+  type BridgeHost,
+  type BridgeHostHandlers,
+} from "./host";
+import { BRIDGE_METHOD, unsupportedMethod } from "./protocol";
 import {
   createDepositWatch,
   type DepositRow,
   type DepositWatch,
 } from "./deposit-watch";
+import { isSameOrigin, parseHttpsAuthority } from "./origin";
 import { formatVersionHeader } from "./version";
 import type {
   Caip27Params,
@@ -157,11 +164,6 @@ export interface DepositSheetProps {
   renderLoading?: () => ReactNode;
 }
 
-function originOf(url: string): string {
-  const match = /^https:\/\/[^/]+/i.exec(url);
-  return match ? match[0] : url;
-}
-
 export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
   const {
     visible,
@@ -196,16 +198,48 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
   // channel's point of view, and rotating it would only orphan frames in
   // flight.
   const nonce = useMemo(() => createSessionNonce(), []);
-  const origin = useMemo(() => originOf(embedUrl), [embedUrl]);
+  const authority = useMemo(
+    () => parseHttpsAuthority(embedUrl) ?? "",
+    [embedUrl],
+  );
 
-  // Read by handlers the host calls between renders, so they must not close
-  // over a stale render's props.
+  /**
+   * Everything the host reaches for between renders goes through a ref.
+   *
+   * Not a style: a parent that re-renders with a fresh arrow for any of these
+   * would otherwise change the identity of the effect's dependencies, and the
+   * effect's cleanup CLOSES the bridge. A request already awaiting a signature
+   * would answer into a closed host and never reach the page, which is a
+   * payment hanging mid-flow because the screen above it repainted.
+   */
   const configRef = useRef(config);
   configRef.current = config;
   const walletRef = useRef(wallet);
   walletRef.current = wallet;
-  const callbacksRef = useRef({ onReady, onLifecycle, onAnalytics, onError });
-  callbacksRef.current = { onReady, onLifecycle, onAnalytics, onError };
+  const latestRef = useRef({
+    onReady,
+    onLifecycle,
+    onAnalytics,
+    onError,
+    onDepositSettled,
+    onFatal,
+    onDismiss,
+    sendTransaction,
+    signRecovery,
+    openUrl,
+  });
+  latestRef.current = {
+    onReady,
+    onLifecycle,
+    onAnalytics,
+    onError,
+    onDepositSettled,
+    onFatal,
+    onDismiss,
+    sendTransaction,
+    signRecovery,
+    openUrl,
+  };
 
   const hostIdentity = useMemo(
     () => ({
@@ -222,8 +256,8 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
 
   const dismissNow = useCallback(() => {
     pendingDismissRef.current = false;
-    onDismiss();
-  }, [onDismiss]);
+    latestRef.current.onDismiss();
+  }, []);
 
   /**
    * A dismissal the page did not ask for: the close affordance the host owns.
@@ -246,21 +280,63 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
     dismissNow();
   }, [dismissNow]);
 
+  /**
+   * Which handlers exist is what the handshake announces, so only their
+   * PRESENCE may rebuild the host — never their identity.
+   *
+   * A presence change really is a different session: capabilities are announced
+   * once at hello and there is no frame that revises them, so an app that
+   * gains `openUrl` mid-flow needs a new handshake for the page to offer the
+   * row. That is rare and deliberate. An arrow function that changed identity
+   * on every parent render is neither.
+   */
+  const hasWallet = Boolean(wallet);
+  const hasSendTransaction = Boolean(sendTransaction);
+  const hasSignRecovery = Boolean(signRecovery);
+  const hasOpenUrl = Boolean(openUrl);
+
   const handlers: BridgeHostHandlers = useMemo(
     () => ({
-      ...(wallet
+      ...(hasWallet
         ? {
             walletRequest: (params: Caip27Params) =>
               (walletRef.current as WalletBridge).request(params),
           }
         : {}),
-      ...(sendTransaction ? { sendTransaction } : {}),
-      ...(signRecovery ? { signRecovery } : {}),
-      ...(openUrl ? { openUrl } : {}),
+      // Each re-reads the ref rather than closing over the prop, and answers
+      // 4200 if it has since gone. A handler removed mid-render is a frame or
+      // two ahead of the effect that rebuilds the host, and "unsupported" is
+      // the truthful answer in that window — a crash inside a sending handler
+      // would be reported as an uncertain submission, which it is not.
+      ...(hasSendTransaction
+        ? {
+            sendTransaction: (params: SendTransactionParams) => {
+              const handler = latestRef.current.sendTransaction;
+              if (!handler) throw new HostError(unsupportedMethod(BRIDGE_METHOD.SEND_TRANSACTION));
+              return handler(params);
+            },
+          }
+        : {}),
+      ...(hasSignRecovery
+        ? {
+            signRecovery: (params: SignRecoveryParams) => {
+              const handler = latestRef.current.signRecovery;
+              if (!handler) throw new HostError(unsupportedMethod(BRIDGE_METHOD.SIGN_RECOVERY));
+              return handler(params);
+            },
+          }
+        : {}),
+      ...(hasOpenUrl
+        ? {
+            openUrl: (params: OpenUrlParams) => {
+              const handler = latestRef.current.openUrl;
+              if (!handler) throw new HostError(unsupportedMethod(BRIDGE_METHOD.OPEN_URL));
+              return handler(params);
+            },
+          }
+        : {}),
     }),
-    // `wallet` only gates whether the capability exists; the call itself goes
-    // through the ref, so a new snapshot every render does not rebuild the host.
-    [Boolean(wallet), sendTransaction, signRecovery, openUrl],
+    [hasWallet, hasSendTransaction, hasSignRecovery, hasOpenUrl],
   );
 
   // The host lives as long as the sheet is open. Rebuilding it mid-session
@@ -294,7 +370,7 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
           recipient,
           versionHeader: formatVersionHeader(modalVersion, hostIdentity),
           ...(pollIntervalMs ? { intervalMs: pollIntervalMs } : {}),
-          onSettled: (deposit) => onDepositSettled?.(deposit),
+          onSettled: (deposit) => latestRef.current.onDepositSettled?.(deposit),
           onError: () => {
             // A poll failure is not the flow's failure — the page is running
             // its own tracker against the same backend and reports what it
@@ -305,7 +381,7 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
         watch.start();
       },
       onEvent: (type, payload) => {
-        const callbacks = callbacksRef.current;
+        const callbacks = latestRef.current;
         switch (type) {
           case "ready":
             setLoading(false);
@@ -361,15 +437,26 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
 
     // Android's injection window is best-effort, and a page that asked for the
     // channel too early has already failed its handshake rather than waiting.
-    const timer = setTimeout(() => {
-      if (settled) return;
-      if (!reloadedRef.current) {
-        reloadedRef.current = true;
-        webViewRef.current?.reload();
-        return;
-      }
-      onFatal?.(new Error("The deposit page did not complete its handshake."));
-    }, handshakeTimeoutMs);
+    // One reload fixes that; a second would only loop, so the deadline is armed
+    // again after it and the second expiry is reported rather than swallowed —
+    // otherwise a page that is simply broken leaves the sheet on its spinner
+    // for as long as the user is willing to look at it.
+    let timer: ReturnType<typeof setTimeout>;
+    const arm = () => {
+      timer = setTimeout(() => {
+        if (settled) return;
+        if (!reloadedRef.current) {
+          reloadedRef.current = true;
+          webViewRef.current?.reload();
+          arm();
+          return;
+        }
+        latestRef.current.onFatal?.(
+          new Error("The deposit page did not complete its handshake."),
+        );
+      }, handshakeTimeoutMs);
+    };
+    arm();
 
     return () => {
       clearTimeout(timer);
@@ -378,17 +465,7 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
       watchRef.current?.stop();
       watchRef.current = null;
     };
-  }, [
-    visible,
-    nonce,
-    hostIdentity,
-    handlers,
-    handshakeTimeoutMs,
-    pollIntervalMs,
-    onDepositSettled,
-    onFatal,
-    dismissNow,
-  ]);
+  }, [visible, nonce, hostIdentity, handlers, handshakeTimeoutMs, pollIntervalMs]);
 
   // Config is not a mount-time value: appearance can change while the sheet is
   // open, and the page repaints in place without disturbing the flow.
@@ -434,20 +511,25 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
    * The web view is pinned to our origin.
    *
    * A redirect inside the container would otherwise put another document on the
-   * same web view as the bridge. Anything else is a link the page meant to open
-   * outside — a block explorer, a provider's terms — and handing it to the
-   * browser is what keeps it from being a dead tap.
+   * same web view as the bridge — and the main-frame injection would hand it
+   * the nonce. Compared by parsing rather than by prefix, because
+   * `https://deposit.rhinestone.dev.evil.example` passes a `startsWith` and is
+   * not our origin.
+   *
+   * Anything else is a link the page meant to open outside — a block explorer,
+   * a provider's terms — and handing it to the browser is what keeps it from
+   * being a dead tap.
    */
   const onShouldStartLoadWithRequest = useCallback(
     (request: { url: string; navigationType?: string }) => {
       if (request.url === "about:blank") return true;
-      if (request.url.startsWith(origin)) return true;
-      if (request.url.startsWith("https://") && openUrl) {
-        void openUrl({ url: request.url });
+      if (isSameOrigin(request.url, embedUrl)) return true;
+      if (parseHttpsAuthority(request.url) && latestRef.current.openUrl) {
+        latestRef.current.openUrl({ url: request.url });
       }
       return false;
     },
-    [origin, openUrl],
+    [embedUrl],
   );
 
   return (
@@ -462,7 +544,9 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
         <WebView
           ref={webViewRef}
           source={{ uri: embedUrl }}
-          originWhitelist={[`${origin}/*`]}
+          // Belt to `onShouldStartLoadWithRequest`'s braces, and the weaker of
+          // the two: this one really is a prefix match.
+          originWhitelist={[`https://${authority}/*`]}
           // Only the main frame learns the nonce, which is what stops a
           // third-party frame reaching the wallet through a channel neither
           // platform scopes on its own.
