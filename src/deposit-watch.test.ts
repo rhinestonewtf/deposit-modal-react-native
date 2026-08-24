@@ -113,6 +113,55 @@ describe("a deposit the page never saw finish", () => {
   });
 });
 
+describe("a poll that lands while the baseline is still out", () => {
+  it("does not take the baseline from a later response", async () => {
+    const settled: DepositRow[] = [];
+    let releaseBaseline: ((rows: DepositRow[]) => void) | undefined;
+    const responses: DepositRow[][] = [[row("0xaa", "completed")]];
+    let call = 0;
+
+    const fetchImpl = vi.fn(async (_url: unknown, init?: unknown) => {
+      call += 1;
+      const signal = (init as { signal?: AbortSignal })?.signal;
+      const rows =
+        call === 1
+          ? await new Promise<DepositRow[]>((resolve, reject) => {
+              releaseBaseline = resolve;
+              signal?.addEventListener("abort", () =>
+                reject(new Error("aborted")),
+              );
+            })
+          : (responses.shift() ?? []);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ deposits: rows }),
+      } as unknown as Response;
+    });
+
+    const watch = createDepositWatch({
+      backendUrl: BACKEND,
+      recipient: RECIPIENT,
+      versionHeader: "0.13.0 (ios)",
+      onSettled: (deposit) => settled.push(deposit),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const baseline = watch.poll();
+    // Returning from the payment browser, while the first read is still out.
+    await watch.poll();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    // The baseline itself sees nothing, because nothing had finished yet.
+    releaseBaseline?.([]);
+    await baseline;
+
+    // The deposit that settled while the user was away is news, not history.
+    await watch.poll();
+    expect(settled.map((deposit) => deposit.txHash)).toEqual(["0xaa"]);
+  });
+});
+
 describe("a status nobody has seen before", () => {
   it("is treated as in flight rather than as a completion", () => {
     expect(isTerminal("settling-on-a-new-rail")).toBe(false);

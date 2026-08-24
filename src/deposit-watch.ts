@@ -87,6 +87,7 @@ export function createDepositWatch(options: DepositWatchOptions): DepositWatch {
    */
   const reported = new Set<string>();
   let baselineTaken = false;
+  let baselineInFlight = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   let inFlight: AbortController | undefined;
   let running = false;
@@ -95,9 +96,17 @@ export function createDepositWatch(options: DepositWatchOptions): DepositWatch {
   // the caller asked for — returning from the payment browser is the case, and
   // that arrives as an app-state change rather than as a tick.
   async function poll(): Promise<void> {
+    // The poll that takes the baseline must be allowed to finish. Aborting it
+    // hands the baseline to a later response, and every terminal row in THAT
+    // one is suppressed as history — including the deposit that settled while
+    // the user was away, which is the single case this whole watch exists for.
+    // Returning from the payment browser is exactly when both happen at once.
+    if (!baselineTaken && baselineInFlight) return;
+
     inFlight?.abort();
     const controller = new AbortController();
     inFlight = controller;
+    if (!baselineTaken) baselineInFlight = true;
 
     try {
       const url = `${backendUrl.replace(/\/$/, "")}/deposits?recipient=${encodeURIComponent(recipient)}&limit=${limit}`;
@@ -141,6 +150,9 @@ export function createDepositWatch(options: DepositWatchOptions): DepositWatch {
       onError?.(error);
     } finally {
       if (inFlight === controller) inFlight = undefined;
+      // Cleared even on an abort or a failure, or a baseline that never
+      // arrived would lock every later poll out.
+      baselineInFlight = false;
     }
   }
 
