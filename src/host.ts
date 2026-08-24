@@ -149,6 +149,7 @@ export type DropReason =
   | "not-an-object"
   | "unknown-kind"
   | "unmatched-response"
+  | "bad-ui-state"
   | "closed";
 
 export type HostStats = Record<DropReason, number>;
@@ -179,8 +180,28 @@ function emptyStats(): HostStats {
     "not-an-object": 0,
     "unknown-kind": 0,
     "unmatched-response": 0,
+    "bad-ui-state": 0,
     closed: 0,
   };
+}
+
+/**
+ * The dismissal lock is the one payload this host reads a nested field out of,
+ * so it is the one that has to be checked rather than cast.
+ *
+ * The page and the wrapper ship separately and by different routes — a hosted
+ * page against an app-store build — so a frame from a version that spells this
+ * differently is a thing that will happen, not a hypothetical. Casting it and
+ * reading `dismissal.state` turns that into a crash inside someone's app, which
+ * is the one outcome a protocol mismatch must never produce.
+ */
+function isUiState(payload: unknown): payload is UiStatePayload {
+  const candidate = payload as UiStatePayload | undefined;
+  if (!candidate || typeof candidate.screen !== "string") return false;
+  const dismissal = candidate.dismissal as
+    | UiStatePayload["dismissal"]
+    | undefined;
+  return dismissal?.state === "allowed" || dismissal?.state === "blocked";
 }
 
 /**
@@ -361,10 +382,14 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
   function onEnvelope(envelope: Envelope): void {
     if (envelope.kind === "event") {
       if (envelope.type === "ui.state") {
-        const payload = envelope.payload as UiStatePayload | undefined;
-        // A full snapshot every time, so a dropped frame self-heals on the
-        // next one and this can be replaced wholesale.
-        if (payload && typeof payload.screen === "string") uiState = payload;
+        // Dropped rather than forwarded, so nothing downstream has to wonder
+        // whether the lock it is reading is shaped like one. A full snapshot
+        // arrives on every change, so the next one heals this.
+        if (!isUiState(envelope.payload)) {
+          stats["bad-ui-state"] += 1;
+          return;
+        }
+        uiState = envelope.payload;
       }
       onEvent?.(envelope.type, envelope.payload);
       return;

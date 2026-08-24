@@ -394,6 +394,40 @@ describe("frames that do not fit", () => {
     expect(page.frames).toHaveLength(0);
   });
 
+  it("drops a lock it cannot read rather than letting a reader trip over it", async () => {
+    const seen: string[] = [];
+    const page = createPageDouble(NONCE);
+    const host = createBridgeHost({
+      post: page.post,
+      nonce: NONCE,
+      host: { platform: "ios" },
+      getConfig: () => CONFIG,
+      getWallet: () => WALLET,
+      getHandlers: () => ({}),
+      onEvent: (type) => seen.push(type),
+    });
+
+    // A page built against a different spelling of the contract. The two ship
+    // separately, so this is a thing that happens rather than a hypothetical.
+    page.send(host, {
+      kind: "event",
+      type: "ui.state",
+      payload: { screen: "review" },
+    });
+    page.send(host, {
+      kind: "event",
+      type: "ui.state",
+      payload: { screen: "review", dismissal: { state: "maybe" } },
+    });
+    await settle();
+
+    expect(host.uiState).toBeUndefined();
+    expect(host.stats["bad-ui-state"]).toBe(2);
+    // Not forwarded either: a consumer reading the lock should never receive
+    // one it has to check for itself.
+    expect(seen).toEqual([]);
+  });
+
   it("tracks the last ui.state snapshot", async () => {
     const { page, host } = setup();
     page.send(host, {
