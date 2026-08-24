@@ -382,6 +382,20 @@ describe("pinning the web view", () => {
     expect(openUrl).not.toHaveBeenCalled();
   });
 
+  it("never lets the web view refuse a URL itself, our own page included", () => {
+    mount({ openUrl: vi.fn() });
+
+    // `react-native-webview` hands a URL its whitelist rejects to
+    // `Linking.openURL` — another app, by scheme, with no gate of ours in
+    // front of it. And a `https://host/*` pattern does not match
+    // `https://host`, which is what `source` carries, so a narrower list also
+    // swallowed the page it was written to protect.
+    expect(native.webView.props?.originWhitelist).toEqual(["*"]);
+    expect(native.webView.props?.source).toEqual({
+      uri: "https://deposit.rhinestone.dev",
+    });
+  });
+
   it("catches the popup path a navigation gate never sees", () => {
     const openUrl = vi.fn();
     mount({ openUrl });

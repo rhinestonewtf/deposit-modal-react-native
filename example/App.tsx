@@ -90,22 +90,40 @@ function useDemoWallet(): WalletBridge | undefined {
 }
 
 export default function App() {
-  const [open, setOpen] = useState(false);
+  // Opening on launch is how the flow is driven on a simulator, where there is
+  // no way to tap.
+  const [open, setOpen] = useState(
+    process.env.EXPO_PUBLIC_AUTO_OPEN === "1",
+  );
   const [status, setStatus] = useState("Idle");
+
+  const report = (line: string) => {
+    setStatus(line);
+    console.log(`[example] ${line}`);
+  };
   const wallet = useDemoWallet();
 
-  const config: EmbedConfig = useMemo(
-    () => ({
-      mode: "deposit",
-      backendUrl: BACKEND_URL,
-      recipient:
-        wallet?.state.accounts[0]?.caip10.split(":")[2] ??
-        "0x0000000000000000000000000000000000000000",
-      targetChain: 8453,
-      targetToken: "USDC",
-      theme: { mode: "system" },
-    }),
-    [wallet],
+  // The demo wallet's address, or one given explicitly for a wallet-free run.
+  // Never a placeholder: registration fails for an address nobody holds, and
+  // the flow reports it as the deposit service being unavailable — which reads
+  // as a backend outage rather than as a misconfigured example.
+  const recipient =
+    wallet?.state.accounts[0]?.caip10.split(":")[2] ??
+    process.env.EXPO_PUBLIC_RECIPIENT;
+
+  const config: EmbedConfig | undefined = useMemo(
+    () =>
+      recipient
+        ? {
+            mode: "deposit",
+            backendUrl: BACKEND_URL,
+            recipient,
+            targetChain: 8453,
+            targetToken: "USDC",
+            theme: { mode: "system" },
+          }
+        : undefined,
+    [recipient],
   );
 
   return (
@@ -117,11 +135,18 @@ export default function App() {
         <Text style={styles.note}>
           {wallet
             ? "Demo wallet loaded."
-            : "No demo key set — QR and manual transfer only."}
+            : recipient
+              ? "No demo key — QR and manual transfer only."
+              : "Set EXPO_PUBLIC_DEMO_PRIVATE_KEY or EXPO_PUBLIC_RECIPIENT."}
         </Text>
-        <Button title="Add funds" onPress={() => setOpen(true)} />
+        <Button
+          title="Add funds"
+          disabled={!config}
+          onPress={() => setOpen(true)}
+        />
       </View>
 
+      {config ? (
       <DepositSheet
         visible={open}
         onDismiss={() => setOpen(false)}
@@ -134,15 +159,19 @@ export default function App() {
           // where a redirect would.
           await WebBrowser.openBrowserAsync(url);
         }}
-        onReady={() => setStatus("Sheet ready")}
+        onReady={() => report("Sheet ready")}
         onLifecycle={(event) =>
-          setStatus(`Lifecycle: ${(event as { type?: string })?.type ?? "?"}`)
+          report(`Lifecycle: ${(event as { type?: string })?.type ?? "?"}`)
+        }
+        onError={(event) =>
+          report(`Error: ${(event as { message?: string })?.message ?? "?"}`)
         }
         onDepositSettled={(deposit) =>
-          setStatus(`Deposit ${deposit.status}: ${deposit.txHash}`)
+          report(`Deposit ${deposit.status}: ${deposit.txHash}`)
         }
-        onFatal={(error) => setStatus(`Failed: ${error.message}`)}
+        onFatal={(error) => report(`Failed: ${error.message}`)}
       />
+      ) : null}
     </SafeAreaView>
   );
 }

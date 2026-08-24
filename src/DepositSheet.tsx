@@ -201,10 +201,6 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
   // channel's point of view, and rotating it would only orphan frames in
   // flight.
   const nonce = useMemo(() => createSessionNonce(), []);
-  const authority = useMemo(
-    () => parseHttpsAuthority(embedUrl) ?? "",
-    [embedUrl],
-  );
 
   /**
    * Everything the host reaches for between renders goes through a ref.
@@ -603,9 +599,21 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
         <WebView
           ref={webViewRef}
           source={{ uri: embedUrl }}
-          // Belt to `onShouldStartLoadWithRequest`'s braces, and the weaker of
-          // the two: this one really is a prefix match.
-          originWhitelist={[`https://${authority}/*`]}
+          // Everything, so that nothing is ever refused HERE.
+          //
+          // This is not the origin pin — `onShouldStartLoadWithRequest` below
+          // is, and it is exact. What this list actually controls is what
+          // `react-native-webview` does with a URL it rejects, which is hand it
+          // to `Linking.openURL`: another app, chosen by scheme, with no gate
+          // of ours in front of it. That is the app-launch primitive
+          // `host.openUrl` exists to refuse, so the list must never reject
+          // anything.
+          //
+          // It also silently swallowed our own page. A pattern of
+          // `https://host/*` does not match `https://host`, which is exactly
+          // what `source` carries, so the first load went to `Linking` and the
+          // sheet sat on its spinner until the handshake deadline.
+          originWhitelist={["*"]}
           // Only the main frame learns the nonce, which is what stops a
           // third-party frame reaching the wallet through a channel neither
           // platform scopes on its own.
