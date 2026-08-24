@@ -51,11 +51,9 @@ import {
 } from "./injection";
 import {
   createBridgeHost,
-  HostError,
   type BridgeHost,
   type BridgeHostHandlers,
 } from "./host";
-import { BRIDGE_METHOD, unsupportedMethod } from "./protocol";
 import {
   createDepositWatch,
   type DepositRow,
@@ -280,63 +278,34 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
   }, [dismissNow]);
 
   /**
-   * Which handlers exist is what the handshake announces, so only their
-   * PRESENCE may rebuild the host — never their identity.
+   * The handlers, rebuilt every render and never a dependency of anything.
    *
-   * A presence change really is a different session: capabilities are announced
-   * once at hello and there is no frame that revises them, so an app that
-   * gains `openUrl` mid-flow needs a new handshake for the page to offer the
-   * row. That is rare and deliberate. An arrow function that changed identity
-   * on every parent render is neither.
+   * Nothing about a handler may rebuild the host — not its identity, and not
+   * its presence either. A host rebuilt because `openUrl` arrived late is a
+   * host rebuilt underneath a page that has already handshaken with the old
+   * one, and the page has no reason to handshake again: wallet pushes stop
+   * reaching it, a back gesture stops asking it, and the only thing that
+   * eventually notices is the handshake deadline, which recovers by reloading
+   * the page out from under whatever the user was doing.
+   *
+   * The cost is that a capability appearing after hello is not announced until
+   * the next session, which is what the protocol says anyway — capabilities
+   * are settled once per handshake. A wallet arriving late is the case that
+   * actually matters, and it needs none of this: wallet availability rides
+   * `wallet.state`, which is pushed.
    */
-  const hasWallet = Boolean(wallet);
-  const hasSendTransaction = Boolean(sendTransaction);
-  const hasSignRecovery = Boolean(signRecovery);
-  const hasOpenUrl = Boolean(openUrl);
-
-  const handlers: BridgeHostHandlers = useMemo(
-    () => ({
-      ...(hasWallet
-        ? {
-            walletRequest: (params: Caip27Params) =>
-              (walletRef.current as WalletBridge).request(params),
-          }
-        : {}),
-      // Each re-reads the ref rather than closing over the prop, and answers
-      // 4200 if it has since gone. A handler removed mid-render is a frame or
-      // two ahead of the effect that rebuilds the host, and "unsupported" is
-      // the truthful answer in that window — a crash inside a sending handler
-      // would be reported as an uncertain submission, which it is not.
-      ...(hasSendTransaction
-        ? {
-            sendTransaction: (params: SendTransactionParams) => {
-              const handler = latestRef.current.sendTransaction;
-              if (!handler) throw new HostError(unsupportedMethod(BRIDGE_METHOD.SEND_TRANSACTION));
-              return handler(params);
-            },
-          }
-        : {}),
-      ...(hasSignRecovery
-        ? {
-            signRecovery: (params: SignRecoveryParams) => {
-              const handler = latestRef.current.signRecovery;
-              if (!handler) throw new HostError(unsupportedMethod(BRIDGE_METHOD.SIGN_RECOVERY));
-              return handler(params);
-            },
-          }
-        : {}),
-      ...(hasOpenUrl
-        ? {
-            openUrl: (params: OpenUrlParams) => {
-              const handler = latestRef.current.openUrl;
-              if (!handler) throw new HostError(unsupportedMethod(BRIDGE_METHOD.OPEN_URL));
-              return handler(params);
-            },
-          }
-        : {}),
-    }),
-    [hasWallet, hasSendTransaction, hasSignRecovery, hasOpenUrl],
-  );
+  const handlersRef = useRef<BridgeHostHandlers>({});
+  handlersRef.current = {
+    ...(wallet
+      ? {
+          walletRequest: (params: Caip27Params) =>
+            (walletRef.current as WalletBridge).request(params),
+        }
+      : {}),
+    ...(sendTransaction ? { sendTransaction } : {}),
+    ...(signRecovery ? { signRecovery } : {}),
+    ...(openUrl ? { openUrl } : {}),
+  };
 
   // The host lives as long as the sheet is open. Rebuilding it mid-session
   // would drop the correlation table with requests outstanding.
@@ -363,7 +332,7 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
           accounts: [],
           chainId: null,
         },
-      handlers,
+      getHandlers: () => handlersRef.current,
       onHello: ({ modalVersion }) => {
         settled = true;
         // The watch cannot start before this: its requests carry the same
@@ -455,7 +424,7 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
       hostRef.current = null;
       setModalVersion(null);
     };
-  }, [visible, nonce, hostIdentity, handlers, handshakeTimeoutMs]);
+  }, [visible, nonce, hostIdentity, handshakeTimeoutMs]);
 
   /**
    * The watch follows the config, rather than the config it was born with.

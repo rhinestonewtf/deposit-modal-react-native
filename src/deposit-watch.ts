@@ -46,6 +46,17 @@ export function isTerminal(status: string): boolean {
   return TERMINAL_DEPOSIT_STATUSES.includes(status.toLowerCase());
 }
 
+/**
+ * Whether a row finished after a given instant.
+ *
+ * Both are ISO-8601 UTC, which compares correctly as text, and a row with no
+ * `completedAt` answers `false` — an unknown completion time is treated as old,
+ * which is the direction that does not invent news.
+ */
+function completedAfter(deposit: DepositRow, instant: string): boolean {
+  return Boolean(instant && deposit.completedAt && deposit.completedAt > instant);
+}
+
 export const DEFAULT_POLL_INTERVAL_MS = 8_000;
 
 export interface DepositWatchOptions {
@@ -88,6 +99,20 @@ export function createDepositWatch(options: DepositWatchOptions): DepositWatch {
   const reported = new Set<string>();
   let baselineTaken = false;
   let baselineInFlight = false;
+  /**
+   * Set when an attempt at the baseline fails, which changes what the eventual
+   * baseline is allowed to suppress — see `startedAt`.
+   */
+  let baselineDegraded = false;
+  /**
+   * Device time at `start()`, used only on a degraded baseline.
+   *
+   * Comparing it against the backend's `completedAt` means trusting two clocks
+   * against each other, so it is deliberately not on the normal path: a
+   * baseline taken first time round suppresses on status alone and no clock
+   * enters into it.
+   */
+  let startedAt = "";
   let timer: ReturnType<typeof setInterval> | undefined;
   let inFlight: AbortController | undefined;
   let running = false;
@@ -96,6 +121,7 @@ export function createDepositWatch(options: DepositWatchOptions): DepositWatch {
   // the caller asked for — returning from the payment browser is the case, and
   // that arrives as an app-state change rather than as a tick.
   async function poll(): Promise<void> {
+    if (!startedAt) startedAt = new Date().toISOString();
     // The poll that takes the baseline must be allowed to finish. Aborting it
     // hands the baseline to a later response, and every terminal row in THAT
     // one is suppressed as history — including the deposit that settled while
@@ -116,6 +142,7 @@ export function createDepositWatch(options: DepositWatchOptions): DepositWatch {
         signal: controller.signal,
       });
       if (!response.ok) {
+        if (!baselineTaken) baselineDegraded = true;
         onError?.(new Error(`Deposit poll failed: ${response.status}`));
         return;
       }
@@ -129,8 +156,17 @@ export function createDepositWatch(options: DepositWatchOptions): DepositWatch {
       // completion it is heading for still fires.
       if (!baselineTaken) {
         for (const deposit of deposits) {
-          if (deposit?.txHash && isTerminal(deposit.status)) {
-            reported.add(deposit.txHash);
+          if (!deposit?.txHash || !isTerminal(deposit.status)) continue;
+          reported.add(deposit.txHash);
+          // A baseline that had to wait for a retry covers a window it did not
+          // watch, and anything that settled inside it would be suppressed as
+          // history — silently, and it is the one case this whole watch is
+          // for. So on the degraded path a completion timestamp later than the
+          // watch's own start is news, and is delivered from the baseline pass
+          // rather than held back for another interval. Over-reporting an old
+          // deposit is visible and recoverable; missing a real one is not.
+          if (baselineDegraded && completedAfter(deposit, startedAt)) {
+            onSettled(deposit);
           }
         }
         baselineTaken = true;
@@ -160,6 +196,7 @@ export function createDepositWatch(options: DepositWatchOptions): DepositWatch {
     start() {
       if (running) return;
       running = true;
+      if (!startedAt) startedAt = new Date().toISOString();
       void poll();
       timer = setInterval(() => void poll(), intervalMs);
     },

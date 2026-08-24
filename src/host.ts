@@ -118,7 +118,22 @@ export interface BridgeHostOptions {
   /** Read at handshake time, so a config change before hello is picked up. */
   getConfig: () => EmbedConfig;
   getWallet: () => WalletState;
-  handlers: BridgeHostHandlers;
+  /**
+   * Read per request, and for the capability list at hello.
+   *
+   * Not a fixed object, because a host that had to be rebuilt when a handler
+   * appeared would be a host rebuilt underneath a page that had already
+   * handshaken with the old one — and the page has no reason to handshake
+   * again. Every wallet update would then stop reaching it, and the only thing
+   * that eventually noticed was the handshake deadline, which recovers by
+   * reloading the page out from under whatever the user was doing.
+   *
+   * What the page is told at hello is therefore a snapshot: a capability that
+   * appears afterwards is not announced until the next session. A wallet is
+   * different and does not need one, because wallet availability rides
+   * `wallet.state`, which is pushed.
+   */
+  getHandlers: () => BridgeHostHandlers;
   onEvent?: (type: string, payload: unknown) => void;
   /** Every `hello`, with the page's own version. Fires once per page load, so
    *  a reload after a crash fires it again. */
@@ -145,7 +160,7 @@ export interface BridgeHost {
   back(): Promise<UiBackResult>;
   pushWalletState(state: WalletState): void;
   configure(config: EmbedConfig): void;
-  /** The capabilities announced at hello, derived from the handlers. */
+  /** What would be announced at hello now, derived from the handlers. */
   readonly capabilities: readonly string[];
   /** Latest `ui.state`, or `undefined` before the first one. */
   readonly uiState: UiStatePayload | undefined;
@@ -208,9 +223,9 @@ function toBridgeError(error: unknown, submitting: boolean): BridgeError {
 }
 
 export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
-  const { post, nonce, handlers, onEvent, onHello } = options;
+  const { post, nonce, getHandlers, onEvent, onHello } = options;
   const backTimeoutMs = options.backTimeoutMs ?? BACK_TIMEOUT_MS;
-  const capabilities = deriveCapabilities(handlers);
+
   const stats = emptyStats();
   const pending = new Map<string, (result: UiBackResult) => void>();
 
@@ -251,6 +266,7 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
     if (!isAllowedWalletMethod(method)) {
       throw new HostError(unsupportedMethod(method));
     }
+    const handlers = getHandlers();
     if (!handlers.walletRequest) {
       throw new HostError(unsupportedMethod(BRIDGE_METHOD.WALLET_REQUEST));
     }
@@ -271,7 +287,7 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
           const result: HelloResult = {
             protocol: PROTOCOL_VERSION,
             host: options.host,
-            capabilities: [...capabilities],
+            capabilities: deriveCapabilities(getHandlers()),
             config: options.getConfig(),
             wallet: options.getWallet(),
           };
@@ -287,6 +303,7 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
           return;
         }
         case BRIDGE_METHOD.SEND_TRANSACTION: {
+          const handlers = getHandlers();
           if (!handlers.sendTransaction) {
             fail(id, unsupportedMethod(method));
             return;
@@ -299,6 +316,7 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
           return;
         }
         case BRIDGE_METHOD.SIGN_RECOVERY: {
+          const handlers = getHandlers();
           if (!handlers.signRecovery) {
             fail(id, unsupportedMethod(method));
             return;
@@ -310,6 +328,7 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
           return;
         }
         case BRIDGE_METHOD.OPEN_URL: {
+          const handlers = getHandlers();
           if (!handlers.openUrl) {
             fail(id, unsupportedMethod(method));
             return;
@@ -435,7 +454,9 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
       emit("session.configure", config);
     },
 
-    capabilities,
+    get capabilities() {
+      return deriveCapabilities(getHandlers());
+    },
 
     get uiState() {
       return uiState;

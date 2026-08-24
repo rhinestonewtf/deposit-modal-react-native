@@ -261,6 +261,50 @@ describe("a parent re-render", () => {
     expect(page.responseTo(id)).toMatchObject({ ok: true });
   });
 
+  it("keeps the session when a handler appears late, and reloads nothing", async () => {
+    vi.useFakeTimers();
+    const onFatal = vi.fn();
+    mount({ onFatal, handshakeTimeoutMs: 1_000 });
+    const page = loadPage();
+    page.hello();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // An app that connects its wallet after startup is the ordinary case, and
+    // it used to rebuild the host under a page that had already handshaken —
+    // the page then never heard another wallet push, and the handshake
+    // deadline "recovered" by reloading it mid-flow.
+    update({
+      onFatal,
+      handshakeTimeoutMs: 1_000,
+      wallet: {
+        state: {
+          isReady: true,
+          isConnected: true,
+          accounts: [{ caip10: `eip155:8453:${RECIPIENT_A}` }],
+          chainId: "eip155:8453",
+        },
+        request: () => "0x2105",
+      },
+      openUrl: vi.fn(),
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+    expect(native.webView.reloads).toBe(0);
+    expect(onFatal).not.toHaveBeenCalled();
+
+    // The wallet the app just connected reaches the page as a push, which is
+    // how wallet availability travels — it is not a capability.
+    const pushed = page
+      .hostEvents()
+      .filter((frame) => frame.type === "wallet.state");
+    expect(pushed.length).toBeGreaterThan(0);
+    vi.useRealTimers();
+  });
+
   it("keeps one session, so the page is never asked to handshake twice", async () => {
     mount({ onError: () => undefined });
     const page = loadPage();

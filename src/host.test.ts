@@ -46,7 +46,7 @@ function setup(handlers: BridgeHostHandlers = {}) {
     host: { platform: "ios", app: "TestApp", version: "1.0.0" },
     getConfig: () => CONFIG,
     getWallet: () => WALLET,
-    handlers,
+    getHandlers: () => handlers,
   });
   return { page, host };
 }
@@ -111,7 +111,7 @@ describe("handshake", () => {
       host: { platform: "android" },
       getConfig: () => CONFIG,
       getWallet: () => WALLET,
-      handlers: {},
+      getHandlers: () => ({}),
       onHello,
     });
     page.send(host, hello());
@@ -132,7 +132,7 @@ describe("handshake", () => {
       host: { platform: "ios" },
       getConfig: () => config,
       getWallet: () => WALLET,
-      handlers: {},
+      getHandlers: () => ({}),
     });
     config = { ...CONFIG, theme: { mode: "dark" } };
     page.send(host, hello());
@@ -358,7 +358,7 @@ describe("ui.back", () => {
       host: { platform: "android" },
       getConfig: () => CONFIG,
       getWallet: () => WALLET,
-      handlers: {},
+      getHandlers: () => ({}),
       backTimeoutMs: 50,
     });
     page.send(host, hello());

@@ -162,6 +162,69 @@ describe("a poll that lands while the baseline is still out", () => {
   });
 });
 
+describe("a baseline that had to wait for a retry", () => {
+  it("does not swallow what settled while it was failing", async () => {
+    const settled: DepositRow[] = [];
+    const older = "2026-08-24T09:00:00.000Z";
+    const newer = "2999-01-01T00:00:00.000Z";
+    let call = 0;
+    const fetchImpl = vi.fn(async () => {
+      call += 1;
+      // The first attempt fails, so the baseline covers a window it never saw.
+      if (call === 1) return { ok: false, status: 503 } as unknown as Response;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          deposits: [
+            { txHash: "0xold", status: "completed", completedAt: older },
+            { txHash: "0xnew", status: "completed", completedAt: newer },
+          ],
+        }),
+      } as unknown as Response;
+    });
+
+    const watch = createDepositWatch({
+      backendUrl: BACKEND,
+      recipient: RECIPIENT,
+      versionHeader: "0.13.0 (ios)",
+      onSettled: (deposit) => settled.push(deposit),
+      onError: () => undefined,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    await watch.poll();
+    await watch.poll();
+
+    // The one that finished after the watch started is news; the one from this
+    // morning is still history.
+    expect(settled.map((deposit) => deposit.txHash)).toEqual(["0xnew"]);
+  });
+
+  it("suppresses on status alone when the first attempt succeeded", async () => {
+    const settled: DepositRow[] = [];
+    const { watch } = watchOver(
+      [
+        [
+          {
+            txHash: "0xaa",
+            status: "completed",
+            completedAt: "2999-01-01T00:00:00.000Z",
+          },
+        ],
+      ],
+      (deposit) => settled.push(deposit),
+    );
+
+    await watch.poll();
+    await watch.poll();
+
+    // No clock enters the normal path, so a completion timestamp in the future
+    // — a skewed backend, or one that stamps optimistically — changes nothing.
+    expect(settled).toEqual([]);
+  });
+});
+
 describe("a status nobody has seen before", () => {
   it("is treated as in flight rather than as a completion", () => {
     expect(isTerminal("settling-on-a-new-rail")).toBe(false);
