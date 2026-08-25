@@ -101,6 +101,7 @@ try {
 }
 
 const breaks: string[] = [];
+const notes: string[] = [];
 
 if (published.transcriptFormat !== vendored.transcriptFormat) {
   breaks.push(
@@ -117,6 +118,10 @@ if (published.vocabulary.protocol < vendored.vocabulary.protocol) {
   breaks.push(
     `protocol went backwards: vendored ${vendored.vocabulary.protocol}, published ${published.vocabulary.protocol}`,
   );
+} else if (published.vocabulary.protocol > vendored.vocabulary.protocol) {
+  notes.push(
+    `protocol ${vendored.vocabulary.protocol} → ${published.vocabulary.protocol}`,
+  );
 }
 
 const NAME_LISTS = [
@@ -130,8 +135,6 @@ const NAME_LISTS = [
   "dismissalReasons",
   "dismissSources",
 ] as const;
-
-const notes: string[] = [];
 
 for (const list of NAME_LISTS) {
   const now = new Set(published.vocabulary[list]);
