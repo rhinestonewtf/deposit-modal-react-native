@@ -38,6 +38,13 @@ interface Vocabulary {
   walletMethods: string[];
   errorDomain: string;
   errorCodes: Record<string, number>;
+  signRecovery?: {
+    domain: Record<string, string>;
+    types: Record<string, { name: string; type: string }[]>;
+    primaryType: string;
+    encodeType: string;
+    domainEncodeType: string;
+  };
 }
 
 type Shape = string | { [key: string]: Shape } | Shape[];
@@ -154,6 +161,49 @@ for (const [field, value] of [
         ? published.vocabulary.channels.pageToHost
         : published.vocabulary.channels.hostToPage;
   if (now !== value) breaks.push(`${field} changed "${value}" → "${now}"`);
+}
+
+// A cap this wrapper hard-codes and must EQUAL, like the channel names above.
+// Lowered, it sends frames the page drops; raised, it drops frames the page now
+// considers legal. Neither direction is an addition.
+if (published.vocabulary.maxFrameLength !== vendored.vocabulary.maxFrameLength) {
+  breaks.push(
+    `maxFrameLength changed ${vendored.vocabulary.maxFrameLength} → ${published.vocabulary.maxFrameLength}`,
+  );
+}
+
+/**
+ * The EIP-712 recovery constants, which no frame comparison could ever reach:
+ * `host.signRecovery` sends the FIELDS and each host compiles the struct in, so
+ * they cross the channel only as their consequence. The replay checks them
+ * against the VENDORED copy, which leaves a page-side change looking fresh —
+ * and the failure is remote and late, because the field array is hashed in
+ * declared order, so a reorder derives a different separator and produces a
+ * signature that is well formed, passes locally, and is rejected by the
+ * processor. Compared verbatim, order included, for that reason.
+ */
+if (!published.vocabulary.signRecovery) {
+  breaks.push("signRecovery is gone from the published vocabulary");
+} else if (vendored.vocabulary.signRecovery) {
+  const mine = vendored.vocabulary.signRecovery;
+  const theirs = published.vocabulary.signRecovery;
+  for (const [field, was, now] of [
+    ["signRecovery.domain", mine.domain, theirs.domain],
+    ["signRecovery.types", mine.types, theirs.types],
+    ["signRecovery.primaryType", mine.primaryType, theirs.primaryType],
+    ["signRecovery.encodeType", mine.encodeType, theirs.encodeType],
+    [
+      "signRecovery.domainEncodeType",
+      mine.domainEncodeType,
+      theirs.domainEncodeType,
+    ],
+  ] as const) {
+    if (JSON.stringify(was) !== JSON.stringify(now)) {
+      breaks.push(
+        `${field} changed ${JSON.stringify(was)} → ${JSON.stringify(now)}`,
+      );
+    }
+  }
 }
 
 /**

@@ -46,8 +46,12 @@ import {
   PAGE_EVENT,
   PAGE_TO_HOST_CHANNEL,
   PROTOCOL_VERSION,
+  type Caip27Params,
   type EmbedConfig,
   type Envelope,
+  type OpenUrlParams,
+  type SendTransactionParams,
+  type SignRecoveryParams,
   type WalletState,
 } from "./protocol";
 
@@ -131,16 +135,22 @@ function isRecord(shape: Shape): shape is { [key: string]: Shape } {
  * and a placeholder would be refused for conformance rather than for drift.
  * Keyed by field name, since that is what the shape carries.
  */
-const CONSTRAINED_LEAVES: Record<string, unknown> = {
-  url: "https://pay.example.com/order",
-  to: "0x2222222222222222222222222222222222222222",
-  from: "0x1111111111111111111111111111111111111111",
-  signer: "0x1111111111111111111111111111111111111111",
-  destination: "0x2222222222222222222222222222222222222222",
-  token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-  amount: "1000000",
-  depositId: "4242",
-  chainId: 8453,
+const CONSTRAINED_LEAVES: Record<
+  string,
+  { string?: unknown; number?: unknown }
+> = {
+  url: { string: "https://pay.example.com/order" },
+  to: { string: "0x2222222222222222222222222222222222222222" },
+  from: { string: "0x1111111111111111111111111111111111111111" },
+  signer: { string: "0x1111111111111111111111111111111111111111" },
+  destination: { string: "0x2222222222222222222222222222222222222222" },
+  token: { string: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" },
+  amount: { string: "1000000" },
+  depositId: { string: "4242" },
+  // Two contracts share this name: a bare id for the transaction methods, a
+  // CAIP-2 reference for CAIP-27. Keyed by name alone they collapse, and the
+  // replay drove a number where the page sends `eip155:8453`.
+  chainId: { number: 8453, string: "eip155:8453" },
 };
 
 /**
@@ -154,8 +164,9 @@ const CONSTRAINED_LEAVES: Record<string, unknown> = {
  * than skipped.
  */
 function materialize(shape: Shape, key = ""): unknown {
-  if (key in CONSTRAINED_LEAVES && typeof shape === "string") {
-    return CONSTRAINED_LEAVES[key];
+  if (shape === "string" || shape === "number") {
+    const constrained = CONSTRAINED_LEAVES[key]?.[shape];
+    if (constrained !== undefined) return constrained;
   }
   if (shape === "string") return "x";
   if (shape === "number") return 1;
@@ -319,10 +330,20 @@ const WALLET: WalletState = {
   name: "Conformance Wallet",
 };
 
+/** What each handler was handed. The answers below are computed without it, so
+ *  this is the only place the REQUEST half of the contract is observable. */
+interface Received {
+  walletRequest?: Caip27Params;
+  sendTransaction?: SendTransactionParams;
+  signRecovery?: SignRecoveryParams;
+  openUrl?: OpenUrlParams;
+}
+
 /** Every handler supplied, so every capability is announced and no method is
  *  refused for a reason that is not drift. */
 function hostWithEverything() {
   const page = createPageDouble(NONCE);
+  const received: Received = {};
   const host = createBridgeHost({
     post: page.post,
     nonce: NONCE,
@@ -330,8 +351,9 @@ function hostWithEverything() {
     getConfig: () => CONFIG,
     getWallet: () => WALLET,
     getHandlers: () => ({
-      walletRequest: ({ request }) => {
-        switch (request.method) {
+      walletRequest: (params) => {
+        received.walletRequest = params;
+        switch (params.request.method) {
           case "eth_chainId":
             return "0x2105";
           case "eth_accounts":
@@ -344,12 +366,60 @@ function hostWithEverything() {
             return `0x${"11".repeat(32)}`;
         }
       },
-      sendTransaction: () => ({ txHash: `0x${"7a".repeat(32)}` }),
-      signRecovery: () => ({ signature: `0x${"5c".repeat(65)}` }),
-      openUrl: () => {},
+      sendTransaction: (params) => {
+        received.sendTransaction = params;
+        return { txHash: `0x${"7a".repeat(32)}` };
+      },
+      signRecovery: (params) => {
+        received.signRecovery = params;
+        return { signature: `0x${"5c".repeat(65)}` };
+      },
+      openUrl: (params) => {
+        received.openUrl = params;
+      },
     }),
   });
-  return { page, host };
+  return { page, host, received };
+}
+
+/** Drive one recorded request into the host and wait for its answer. */
+async function drive(frame: TranscriptFrame) {
+  const { page, host, received } = hostWithEverything();
+  const id = `replay-${frame.method}-${frame.walletMethod ?? ""}`;
+
+  page.send(host, {
+    kind: "request",
+    id,
+    method: frame.method!,
+    ...(frame.shape === undefined ? {} : { params: materialize(frame.shape) }),
+  } as Envelope);
+
+  // The host answers from a promise chain, never synchronously inside the
+  // page's own call stack — the same rule the page's mock host follows.
+  await vi.waitFor(() =>
+    expect(
+      page.frames.some((sent) => sent.kind === "response" && sent.id === id),
+      `no answer to ${frame.method}`,
+    ).toBe(true),
+  );
+
+  const answer = page.frames.find(
+    (sent): sent is Extract<Envelope, { kind: "response" }> =>
+      sent.kind === "response" && sent.id === id,
+  )!;
+  return { answer, received };
+}
+
+function recordedRequest(method: string, walletMethod?: string) {
+  const frame = transcript.frames.find(
+    (candidate) =>
+      candidate.dir === "page->host" &&
+      candidate.kind === "request" &&
+      candidate.method === method &&
+      candidate.walletMethod === walletMethod,
+  );
+  expect(frame, `no recorded ${method} request`).toBeDefined();
+  return frame!;
 }
 
 describe("the artifact", () => {
@@ -437,33 +507,7 @@ describe("replaying every recorded page→host request", () => {
   for (const frame of requests) {
     const name = `${frame.method}${frame.walletMethod ? ` (${frame.walletMethod})` : ""}`;
     it(`answers ${name}`, async () => {
-      const { page, host } = hostWithEverything();
-      const id = `replay-${name}`;
-
-      page.send(host, {
-        kind: "request",
-        id,
-        method: frame.method!,
-        ...(frame.shape === undefined
-          ? {}
-          : { params: materialize(frame.shape) }),
-      } as Envelope);
-
-      // The host answers from a promise chain, never synchronously inside the
-      // page's own call stack — the same rule the page's mock host follows.
-      await vi.waitFor(() =>
-        expect(
-          page.frames.some(
-            (sent) => sent.kind === "response" && sent.id === id,
-          ),
-          `no answer to ${name}`,
-        ).toBe(true),
-      );
-
-      const answer = page.frames.find(
-        (sent): sent is Extract<Envelope, { kind: "response" }> =>
-          sent.kind === "response" && sent.id === id,
-      )!;
+      const { answer } = await drive(frame);
 
       // A 4200 here means this host does not implement a method the page sends,
       // which is the drift the whole artifact exists to catch — every handler
@@ -493,6 +537,88 @@ describe("replaying every recorded page→host request", () => {
         mismatches(structureOf(answer.result), recorded.shape),
         `${name} answered a shape the page does not expect`,
       ).toEqual([]);
+    });
+  }
+});
+
+/**
+ * What the page SENDS, as opposed to what it reads back.
+ *
+ * The replay above proves the host answers; it cannot prove the answer was
+ * computed from the right fields, because every handler there ignores its
+ * params. A page that renamed `to` to `recipient` would hand the wrapper an
+ * object with no `to` in it, every handler would answer exactly as before, and
+ * the integrator's app — which reads `params.to` — would transfer nothing.
+ *
+ * Each field is named through the wrapper's own parameter type, so a rename in
+ * `protocol.ts` fails `tsc` rather than this; and its type is asserted at
+ * runtime, so a rename or a retype on the PAGE's side fails here.
+ */
+describe("the request fields handed to the host app", () => {
+  it("hands sendTransaction the transfer, not an empty object", async () => {
+    const { received } = await drive(
+      recordedRequest(BRIDGE_METHOD.SEND_TRANSACTION),
+    );
+    expect(received.sendTransaction, "sendTransaction never ran").toBeDefined();
+    const params = received.sendTransaction!;
+    expect({
+      chainId: typeof params.chainId,
+      token: typeof params.token,
+      amount: typeof params.amount,
+      to: typeof params.to,
+      from: typeof params.from,
+    }).toEqual({
+      chainId: "number",
+      token: "string",
+      amount: "string",
+      to: "string",
+      from: "string",
+    });
+  });
+
+  // `chainId` is NOT part of the signed domain, so a wrong one here is not
+  // caught by the struct check above — it picks the verifier.
+  it("hands signRecovery the deposit it is signing for", async () => {
+    const { received } = await drive(
+      recordedRequest(BRIDGE_METHOD.SIGN_RECOVERY),
+    );
+    expect(received.signRecovery, "signRecovery never ran").toBeDefined();
+    const params = received.signRecovery!;
+    expect({
+      chainId: typeof params.chainId,
+      signer: typeof params.signer,
+      depositId: typeof params.depositId,
+      destination: typeof params.destination,
+    }).toEqual({
+      chainId: "number",
+      signer: "string",
+      depositId: "string",
+      destination: "string",
+    });
+  });
+
+  it("hands openUrl a url", async () => {
+    const { received } = await drive(recordedRequest(BRIDGE_METHOD.OPEN_URL));
+    expect(received.openUrl, "openUrl never ran").toBeDefined();
+    expect(typeof received.openUrl!.url).toBe("string");
+  });
+
+  // The CAIP-27 envelope, where `chainId` is a CAIP-2 reference rather than the
+  // bare id the transaction methods send. It is authoritative for the request —
+  // the chain the wallet must execute on, not a report of where it is — so a
+  // host reading it as a number switches to nothing.
+  for (const walletMethod of ALLOWED_WALLET_METHODS) {
+    it(`hands walletRequest a CAIP-27 envelope for ${walletMethod}`, async () => {
+      const { received } = await drive(
+        recordedRequest(BRIDGE_METHOD.WALLET_REQUEST, walletMethod),
+      );
+      expect(received.walletRequest, "walletRequest never ran").toBeDefined();
+      const params = received.walletRequest!;
+      expect({
+        chainId: typeof params.chainId,
+        method: typeof params.request.method,
+      }).toEqual({ chainId: "string", method: "string" });
+      expect(params.request.method).toBe(walletMethod);
     });
   }
 });
