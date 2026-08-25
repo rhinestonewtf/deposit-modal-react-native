@@ -61,6 +61,9 @@ interface TranscriptFrame {
   answers?: string;
   ok?: boolean;
   errorCode?: number;
+  /** The host forwards this payload verbatim rather than reading a field out
+   *  of it. */
+  passthrough?: boolean;
   shape?: Shape;
 }
 
@@ -236,11 +239,20 @@ function kindOf(shape: Shape): "object" | "array" | "leaf" {
   return isRecord(shape) ? "object" : "leaf";
 }
 
+/** A leaf the page recorded by VALUE rather than by type: a discriminant, a
+ *  method name, a dismissal reason. */
+function isLiteral(shape: Shape): boolean {
+  return typeof shape === "string" && !LEAF_TYPES.has(shape);
+}
+
 /**
- * Literals collapse to their type, record keys sort, and union alternatives
- * sort and dedupe — so two recordings of the same contract compare equal
- * whatever order they were written in and whichever values they happened to
- * catch. A literal changing is a vocabulary change, and the lists above own it.
+ * Record keys sort, union alternatives sort and dedupe — so two recordings of
+ * the same contract compare equal whatever order they were written in.
+ *
+ * Literals are NOT collapsed to their type. `ui.state.dismissal.state` is
+ * compared against `"allowed"` and `"blocked"` in `host.ts`, so a page that
+ * renames one drops every dismissal frame while every name in the vocabulary
+ * lists stays intact.
  */
 function normalize(shape: Shape): Shape {
   if (Array.isArray(shape)) {
@@ -258,11 +270,21 @@ function normalize(shape: Shape): Shape {
     }
     return record;
   }
-  return leafType(shape);
+  return shape;
 }
 
 function canonical(shape: Shape): string {
   return JSON.stringify(normalize(shape));
+}
+
+/**
+ * A payload the host forwards verbatim reads no discriminant out of, so its
+ * vocabulary churning is the product's business rather than this contract's —
+ * new analytics events land constantly, and failing on them is what would train
+ * people to re-vendor without reading. Everything else the host PARSES.
+ */
+function vocabularyMoved(message: string, passthrough: boolean): void {
+  (passthrough ? notes : breaks).push(message);
 }
 
 function diffShape(
@@ -270,6 +292,7 @@ function diffShape(
   theirs: Shape,
   where: string,
   path = "",
+  passthrough = false,
 ): void {
   const at = path ? `${where} ${path}` : where;
 
@@ -278,7 +301,7 @@ function diffShape(
       const below = path ? `${path}.${key}` : key;
       const now = theirs[key];
       if (now === undefined) breaks.push(`${where} ${below} is gone`);
-      else diffShape(entry, now, where, below);
+      else diffShape(entry, now, where, below, passthrough);
     }
     for (const key of Object.keys(theirs)) {
       if (!(key in mine)) {
@@ -300,16 +323,23 @@ function diffShape(
       }
       // An alternative that GAINED a field would otherwise read as one that
       // vanished, so pair it with the nearest alternative of the same kind
-      // before calling it gone.
-      const near = spare.findIndex(
-        (candidate) => kindOf(candidate) === kindOf(option),
-      );
+      // before calling it gone. Never for a leaf: a literal cannot gain a
+      // field, and pairing one with an unrelated sibling reports a removal as a
+      // cascade of renames that are not there.
+      const near =
+        kindOf(option) === "leaf"
+          ? -1
+          : spare.findIndex(
+              (candidate) => kindOf(candidate) === kindOf(option),
+            );
       if (near !== -1) {
-        diffShape(option, spare[near]!, where, path);
+        diffShape(option, spare[near]!, where, path, passthrough);
         spare.splice(near, 1);
         continue;
       }
-      breaks.push(`${at} no longer carries ${canonical(option)}`);
+      const gone = `${at} no longer carries ${canonical(option)}`;
+      if (isLiteral(option)) vocabularyMoved(gone, passthrough);
+      else breaks.push(gone);
     }
     for (const option of spare) {
       notes.push(`${at} also carries ${canonical(option)}`);
@@ -317,9 +347,34 @@ function diffShape(
     return;
   }
 
-  if (canonical(mine) !== canonical(theirs)) {
+  if (kindOf(mine) !== kindOf(theirs)) {
     breaks.push(`${at} changed ${canonical(mine)} → ${canonical(theirs)}`);
+    return;
   }
+
+  // Both leaves.
+  const was = leafType(mine as string);
+  const now = leafType(theirs as string);
+  if (was !== now) {
+    breaks.push(`${at} changed ${was} → ${now}`);
+    return;
+  }
+  if (mine === theirs) return;
+  if (!isLiteral(mine)) {
+    // Narrowed: the page now only ever sends one value, which the wrapper
+    // already accepted as a free one.
+    notes.push(`${at} is now always ${canonical(theirs)}`);
+    return;
+  }
+  if (!isLiteral(theirs)) {
+    // Widened: the page may now send anything of that type.
+    notes.push(`${at} widened from ${canonical(mine)} to ${now}`);
+    return;
+  }
+  vocabularyMoved(
+    `${at} changed ${canonical(mine)} → ${canonical(theirs)}`,
+    passthrough,
+  );
 }
 
 function frameKey(frame: TranscriptFrame): string {
@@ -350,7 +405,7 @@ for (const frame of vendored.frames ?? []) {
     breaks.push(`${key} no longer records a shape`);
     continue;
   }
-  diffShape(frame.shape, now.shape, key);
+  diffShape(frame.shape, now.shape, key, "", frame.passthrough === true);
 }
 
 console.log(`vendored  ${vendoredPath}`);

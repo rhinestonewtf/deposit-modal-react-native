@@ -45,6 +45,11 @@ must never resolve them — and because Swift and Kotlin cannot import it at all
 - **It is the only thing that can catch page-side recovery drift.** The offline
   replay compares `protocol.ts` against the VENDORED copy, so a page that moves
   leaves that copy looking correct until this runs.
+- **A payload literal that disappears is a break unless its frame is
+  `passthrough`.** `host.ts` compares `dismissal.state` against `"allowed"` and
+  `"blocked"`, so renaming one drops every `ui.state` frame with no name in any
+  vocabulary list changing. The three forwarded events (`analytics`, `error`,
+  `lifecycle`) are exempt — nothing reads a field out of them.
 - It runs on a **schedule**, not per PR (`.github/workflows/conformance.yml`):
   whether the page has moved is a property of time. The PR gate is the offline
   replay, which needs no network.
