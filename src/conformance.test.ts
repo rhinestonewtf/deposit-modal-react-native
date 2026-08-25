@@ -68,6 +68,9 @@ interface TranscriptFrame {
   dir: "page->host" | "host->page";
   kind: "event" | "request" | "response";
   method?: string;
+  /** The CAIP-27 inner method, which is what a `wallet.request` frame is really
+   *  about — the params shape is the wallet method's, not `wallet.request`'s. */
+  walletMethod?: string;
   type?: string;
   answers?: string;
   ok?: boolean;
@@ -206,28 +209,96 @@ function structureOf(value: unknown): Shape {
   return typeof value as Shape;
 }
 
-/** Whether the recorded shape says this field may be absent. The page records
- *  a field seen present in one scenario and absent in another as a union
- *  carrying `"undefined"`, which is the one fact a native decoder cannot infer
- *  from a single example. */
-function isOptional(shape: Shape): boolean {
-  return Array.isArray(shape) && shape.length !== 1 && shape.includes("undefined");
+/** The names the artifact uses for a leaf. Anything else at a leaf is a
+ *  literal, and a literal constrains an answer's TYPE here — the vocabulary
+ *  string itself is pinned by the checks above, against `protocol.ts`. */
+const LEAF_TYPES = new Set([
+  "string",
+  "number",
+  "boolean",
+  "null",
+  "undefined",
+  "[]",
+]);
+
+function leafType(shape: string): string {
+  return LEAF_TYPES.has(shape) ? shape : "string";
 }
 
 /**
- * The field paths an answer MUST carry.
+ * How an answer's structure fails the recorded shape, as a list of reasons.
  *
- * Optional subtrees are pruned during the walk rather than filtered afterwards:
- * an optional field nested inside a required object is still optional, and a
- * check that only looked at the top level would demand `config.accountAddress`
- * of a deposit-only session that has no account to name.
+ * Presence is not conformance. A field the page retyped from `number` to
+ * `string` is drift this host would keep answering the old way, and a field
+ * that became an object is drift the page would read as `undefined` — so leaves
+ * are compared by type and containers by kind, not by key alone.
+ *
+ * Only the recorded side constrains: an answer carrying a field that was never
+ * recorded is an addition, which the contract permits. A union carrying
+ * `"undefined"` is the page's way of recording a field seen present in one
+ * scenario and absent in another, which is the one fact a native decoder cannot
+ * infer from a single example — an answer may omit it.
+ *
+ * `tolerated` names paths the page reads optionally even though the recording
+ * caught them present; an absent one there is not a failure.
  */
-function requiredPaths(shape: Shape, prefix = ""): string[] {
-  if (isOptional(shape)) return [];
-  if (!isRecord(shape)) return prefix ? [prefix] : [];
-  return Object.entries(shape).flatMap(([key, entry]) =>
-    requiredPaths(entry, prefix ? `${prefix}.${key}` : key),
-  );
+function mismatches(
+  actual: Shape,
+  recorded: Shape,
+  path = "",
+  tolerated: ReadonlySet<string> = new Set(),
+): string[] {
+  const at = path || "the result";
+  if (tolerated.has(path) && actual === "undefined") return [];
+
+  if (Array.isArray(recorded)) {
+    if (recorded.length === 0) return [];
+    // One element is an array shape; more is a union of the alternatives the
+    // field was seen carrying.
+    if (recorded.length === 1) {
+      if (actual === "[]") return [];
+      if (Array.isArray(actual) && actual.length === 1) {
+        return mismatches(actual[0]!, recorded[0]!, `${path}[]`, tolerated);
+      }
+      return [`${at}: expected an array, got ${JSON.stringify(actual)}`];
+    }
+    if (recorded.includes("undefined") && actual === "undefined") return [];
+    const options = recorded.filter((option) => option !== "undefined");
+    const satisfies = (candidate: Shape) =>
+      options.some(
+        (option) => mismatches(candidate, option, path, tolerated).length === 0,
+      );
+    if (satisfies(actual)) return [];
+    // An array whose elements carried differing shapes is written the same way
+    // as a union, so an array of one of the alternatives satisfies it too —
+    // `capabilities` is recorded exactly that way.
+    if (Array.isArray(actual) && actual.length === 1 && satisfies(actual[0]!)) {
+      return [];
+    }
+    return [
+      `${at}: expected one of ${JSON.stringify(recorded)}, got ${JSON.stringify(actual)}`,
+    ];
+  }
+
+  if (isRecord(recorded)) {
+    // An empty record was recorded carrying nothing, so it constrains nothing.
+    if (Object.keys(recorded).length === 0) return [];
+    if (!isRecord(actual)) {
+      return [`${at}: expected an object, got ${JSON.stringify(actual)}`];
+    }
+    return Object.entries(recorded).flatMap(([key, entry]) =>
+      mismatches(
+        actual[key] ?? "undefined",
+        entry,
+        path ? `${path}.${key}` : key,
+        tolerated,
+      ),
+    );
+  }
+
+  const want = leafType(recorded);
+  if (typeof actual === "string" && leafType(actual) === want) return [];
+  return [`${at}: expected ${want}, got ${JSON.stringify(actual)}`];
 }
 
 const CONFIG: EmbedConfig = {
@@ -364,9 +435,10 @@ describe("replaying every recorded page→host request", () => {
   });
 
   for (const frame of requests) {
-    it(`answers ${frame.method}`, async () => {
+    const name = `${frame.method}${frame.walletMethod ? ` (${frame.walletMethod})` : ""}`;
+    it(`answers ${name}`, async () => {
       const { page, host } = hostWithEverything();
-      const id = `replay-${frame.method}`;
+      const id = `replay-${name}`;
 
       page.send(host, {
         kind: "request",
@@ -384,7 +456,7 @@ describe("replaying every recorded page→host request", () => {
           page.frames.some(
             (sent) => sent.kind === "response" && sent.id === id,
           ),
-          `no answer to ${frame.method}`,
+          `no answer to ${name}`,
         ).toBe(true),
       );
 
@@ -398,7 +470,7 @@ describe("replaying every recorded page→host request", () => {
       // is supplied above, so nothing legitimately refuses.
       expect(
         answer.ok || answer.error.code !== 4200,
-        `${frame.method} was refused as unsupported`,
+        `${name} was refused as unsupported`,
       ).toBe(true);
 
       const recorded = transcript.frames.find(
@@ -410,18 +482,17 @@ describe("replaying every recorded page→host request", () => {
       );
       if (!recorded?.shape) return;
 
-      expect(answer.ok, `${frame.method} answered with an error`).toBe(true);
+      expect(answer.ok, `${name} answered with an error`).toBe(true);
       if (!answer.ok) return;
 
-      // Every field the page expects to read must be present. Compared as
-      // paths, so a host omitting a field the page marked optional passes and
-      // one omitting a required field does not.
-      const actual = new Set(requiredPaths(structureOf(answer.result)));
-      for (const path of requiredPaths(recorded.shape)) {
-        expect(actual, `${frame.method} answered without ${path}`).toContain(
-          path,
-        );
-      }
+      // Every field the page expects to read, carrying the type it expects to
+      // read it as. A host omitting a field the page marked optional passes;
+      // one omitting a required field, or answering it as another type, does
+      // not.
+      expect(
+        mismatches(structureOf(answer.result), recorded.shape),
+        `${name} answered a shape the page does not expect`,
+      ).toEqual([]);
     });
   }
 });
@@ -452,15 +523,17 @@ describe("replaying every recorded host→page frame", () => {
         frame.kind === "response" &&
         frame.answers === BRIDGE_METHOD.HELLO,
     );
-    const actual = new Set(
-      requiredPaths(structureOf(answer!.ok ? answer!.result : undefined)),
-    );
-    for (const path of requiredPaths(recorded!.shape!)) {
-      // `host.app` and `host.version` are optional on the page's side; the rest
-      // of hello is not.
-      if (path === "host.app" || path === "host.version") continue;
-      expect(actual, `hello answered without ${path}`).toContain(path);
-    }
+    expect(
+      mismatches(
+        structureOf(answer!.ok ? answer!.result : undefined),
+        recorded!.shape!,
+        "",
+        // `host.app` and `host.version` are optional on the page's side; the
+        // rest of hello is not.
+        new Set(["host.app", "host.version"]),
+      ),
+      "hello answered a shape the page does not expect",
+    ).toEqual([]);
   });
 
   it("emits both host events under the recorded names", () => {

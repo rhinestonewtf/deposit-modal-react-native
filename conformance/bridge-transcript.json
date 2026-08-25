@@ -424,28 +424,41 @@
       "dir": "page->host",
       "kind": "request",
       "method": "wallet.request",
+      "walletMethod": "eth_accounts",
       "shape": {
         "chainId": "string",
         "request": {
-          "method": [
-            "eth_accounts",
-            "eth_chainId",
-            "eth_sendTransaction",
-            "eth_signTypedData_v4",
-            "wallet_sendTransaction",
-            "wallet_switchEthereumChain"
-          ],
+          "method": "eth_accounts",
+          "params": "[]"
+        }
+      }
+    },
+    {
+      "dir": "page->host",
+      "kind": "request",
+      "method": "wallet.request",
+      "walletMethod": "eth_chainId",
+      "shape": {
+        "chainId": "string",
+        "request": {
+          "method": "eth_chainId",
           "params": [
             "[]",
-            "undefined",
-            [
-              "string"
-            ],
-            [
-              {
-                "chainId": "string"
-              }
-            ],
+            "undefined"
+          ]
+        }
+      }
+    },
+    {
+      "dir": "page->host",
+      "kind": "request",
+      "method": "wallet.request",
+      "walletMethod": "eth_sendTransaction",
+      "shape": {
+        "chainId": "string",
+        "request": {
+          "method": "eth_sendTransaction",
+          "params": [
             [
               {
                 "data": "string",
@@ -460,6 +473,57 @@
                 "value": "string"
               }
             ]
+          ]
+        }
+      }
+    },
+    {
+      "dir": "page->host",
+      "kind": "request",
+      "method": "wallet.request",
+      "walletMethod": "eth_signTypedData_v4",
+      "shape": {
+        "chainId": "string",
+        "request": {
+          "method": "eth_signTypedData_v4",
+          "params": [
+            "string"
+          ]
+        }
+      }
+    },
+    {
+      "dir": "page->host",
+      "kind": "request",
+      "method": "wallet.request",
+      "walletMethod": "wallet_sendTransaction",
+      "shape": {
+        "chainId": "string",
+        "request": {
+          "method": "wallet_sendTransaction",
+          "params": [
+            {
+              "from": "string",
+              "to": "string",
+              "value": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "dir": "page->host",
+      "kind": "request",
+      "method": "wallet.request",
+      "walletMethod": "wallet_switchEthereumChain",
+      "shape": {
+        "chainId": "string",
+        "request": {
+          "method": "wallet_switchEthereumChain",
+          "params": [
+            {
+              "chainId": "string"
+            }
           ]
         }
       }
