@@ -577,6 +577,26 @@ describe("replaying every recorded page→host request", () => {
  * `protocol.ts` fails `tsc` rather than this; and its type is asserted at
  * runtime, so a rename or a retype on the PAGE's side fails here.
  */
+/**
+ * What EIP-1193 requires of each wallet method's params — the one part of a
+ * request the page does not get to define.
+ *
+ * Written down rather than derived from the transcript on purpose: the recorded
+ * shape is what the replay drove IN, so checking it against itself proves
+ * nothing. This is the standard, and the wrapper's own types say nothing about
+ * it — `Caip27Params.request.params` is `unknown`, because a host forwards it.
+ * Only the fields a wallet must have are listed; a page sending more is fine.
+ */
+const EIP_1193_PARAMS: Record<string, Shape> = {
+  eth_accounts: ["[]", "undefined"],
+  eth_chainId: ["[]", "undefined"],
+  eth_sendTransaction: [{ from: "string", to: "string" }],
+  wallet_sendTransaction: [{ from: "string", to: "string" }],
+  wallet_switchEthereumChain: [{ chainId: "string" }],
+  /** `[address, typedDataJson]`, both strings. */
+  eth_signTypedData_v4: ["string"],
+};
+
 describe("the request fields handed to the host app", () => {
   it("hands sendTransaction the transfer, not an empty object", async () => {
     const { received } = await drive(
@@ -642,6 +662,15 @@ describe("the request fields handed to the host app", () => {
         method: typeof params.request.method,
       }).toEqual({ chainId: "string", method: "string" });
       expect(params.request.method).toBe(walletMethod);
+
+      // The envelope is not the request. `params` reaches the app's provider
+      // untouched, so a page that renames a field inside it produces a
+      // malformed EIP-1193 call at the wallet and nothing else here would see
+      // it.
+      expect(
+        mismatches(structureOf(params.request.params), EIP_1193_PARAMS[walletMethod]!),
+        `${walletMethod}'s params are not a request a wallet can execute`,
+      ).toEqual([]);
     });
   }
 });
