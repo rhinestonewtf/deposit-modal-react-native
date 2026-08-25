@@ -1,0 +1,477 @@
+{
+  "transcriptFormat": 1,
+  "vocabulary": {
+    "protocol": 2,
+    "channels": {
+      "pageToHost": "rhinestoneBridge",
+      "hostToPage": "__rhinestone_bridge"
+    },
+    "maxFrameLength": 262144,
+    "pageMethods": [
+      "hello",
+      "host.openUrl",
+      "host.sendTransaction",
+      "host.signRecovery",
+      "wallet.request"
+    ],
+    "hostMethods": [
+      "ui.back"
+    ],
+    "pageEvents": [
+      "analytics",
+      "dismissRequested",
+      "error",
+      "lifecycle",
+      "ready",
+      "ui.state",
+      "wallet.connectRequested",
+      "wallet.disconnectRequested"
+    ],
+    "passthroughEvents": [
+      "analytics",
+      "error",
+      "lifecycle"
+    ],
+    "hostEvents": [
+      "session.configure",
+      "wallet.state"
+    ],
+    "capabilities": [
+      "host.openUrl",
+      "host.sendTransaction",
+      "host.signRecovery"
+    ],
+    "walletMethods": [
+      "eth_accounts",
+      "eth_chainId",
+      "eth_sendTransaction",
+      "eth_signTypedData_v4",
+      "wallet_sendTransaction",
+      "wallet_switchEthereumChain"
+    ],
+    "errorDomain": "bridge",
+    "errorCodes": {
+      "CHANNEL_CLOSED": 4,
+      "MALFORMED_RESULT": 5,
+      "REQUEST_TIMEOUT": 3,
+      "SUBMISSION_UNCERTAIN": 2,
+      "WALLET_UNAVAILABLE": 1
+    },
+    "signRecovery": {
+      "domain": {
+        "name": "Rhinestone Deposit Recovery",
+        "version": "1"
+      },
+      "types": {
+        "RecoverDeposit": [
+          {
+            "name": "depositId",
+            "type": "uint256"
+          },
+          {
+            "name": "destination",
+            "type": "address"
+          }
+        ]
+      },
+      "primaryType": "RecoverDeposit",
+      "encodeType": "RecoverDeposit(uint256 depositId,address destination)",
+      "domainEncodeType": "EIP712Domain(string name,string version)"
+    }
+  },
+  "frames": [
+    {
+      "dir": "host->page",
+      "kind": "event",
+      "type": "session.configure",
+      "shape": {
+        "backendUrl": "string",
+        "mode": "deposit",
+        "recipient": "string",
+        "targetChain": "number",
+        "targetToken": "string",
+        "theme": {
+          "mode": "dark"
+        }
+      }
+    },
+    {
+      "dir": "host->page",
+      "kind": "event",
+      "type": "wallet.state",
+      "shape": {
+        "accounts": [
+          {
+            "caip10": "string"
+          }
+        ],
+        "chainId": "string",
+        "isConnected": "boolean",
+        "isReady": "boolean",
+        "name": "string"
+      }
+    },
+    {
+      "dir": "host->page",
+      "kind": "request",
+      "method": "ui.back"
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "hello",
+      "ok": true,
+      "shape": {
+        "capabilities": [
+          "host.openUrl",
+          "host.sendTransaction",
+          "host.signRecovery"
+        ],
+        "config": {
+          "accountAddress": [
+            "string",
+            "undefined"
+          ],
+          "backendUrl": "string",
+          "mode": [
+            "deposit",
+            "withdraw"
+          ],
+          "recipient": "string",
+          "targetChain": "number",
+          "targetToken": "string"
+        },
+        "host": {
+          "app": "string",
+          "platform": "ios"
+        },
+        "protocol": "number",
+        "wallet": {
+          "accounts": [
+            {
+              "caip10": "string"
+            }
+          ],
+          "chainId": "string",
+          "isConnected": "boolean",
+          "isReady": "boolean",
+          "name": "string"
+        }
+      }
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "host.openUrl",
+      "ok": false,
+      "errorCode": 4200
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "host.openUrl",
+      "ok": true,
+      "shape": {}
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "host.sendTransaction",
+      "ok": false,
+      "errorCode": 1,
+      "errorDomain": "bridge"
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "host.sendTransaction",
+      "ok": false,
+      "errorCode": 2,
+      "errorDomain": "bridge"
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "host.sendTransaction",
+      "ok": false,
+      "errorCode": 4200
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "host.sendTransaction",
+      "ok": false,
+      "errorCode": 5,
+      "errorDomain": "bridge"
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "host.sendTransaction",
+      "ok": true,
+      "shape": {
+        "txHash": "string"
+      }
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "host.signRecovery",
+      "ok": false,
+      "errorCode": 4200
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "host.signRecovery",
+      "ok": true,
+      "shape": {
+        "signature": "string"
+      }
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "wallet.request",
+      "ok": true,
+      "shape": [
+        "null",
+        "string",
+        [
+          "string"
+        ]
+      ]
+    },
+    {
+      "dir": "page->host",
+      "kind": "event",
+      "type": "analytics",
+      "passthrough": true,
+      "shape": {
+        "cta_name": [
+          "string",
+          "undefined"
+        ],
+        "pred_balance": "number",
+        "receive_token": [
+          "string",
+          "undefined"
+        ],
+        "send_token": [
+          "string",
+          "undefined"
+        ],
+        "token_balance": [
+          "string",
+          "undefined"
+        ],
+        "token_name": [
+          "string",
+          "undefined"
+        ],
+        "total_balance_in_external_wallet": [
+          "number",
+          "undefined"
+        ],
+        "type": [
+          "deposit_modal_connected_wallet_enter_value_cta_click",
+          "deposit_modal_connected_wallet_enter_value_open",
+          "deposit_modal_connected_wallet_select_source_cta_click",
+          "deposit_modal_connected_wallet_select_source_open"
+        ]
+      }
+    },
+    {
+      "dir": "page->host",
+      "kind": "event",
+      "type": "error",
+      "passthrough": true,
+      "shape": {
+        "code": "string",
+        "message": "string"
+      }
+    },
+    {
+      "dir": "page->host",
+      "kind": "event",
+      "type": "lifecycle",
+      "passthrough": true,
+      "shape": {
+        "address": [
+          "string",
+          "undefined"
+        ],
+        "amount": [
+          "string",
+          "undefined"
+        ],
+        "amountUsd": [
+          "string",
+          "undefined"
+        ],
+        "evm": [
+          "string",
+          "undefined"
+        ],
+        "smartAccount": [
+          "string",
+          "undefined"
+        ],
+        "solana": [
+          "string",
+          "undefined"
+        ],
+        "sourceChain": [
+          "number",
+          "undefined"
+        ],
+        "sourceDecimals": [
+          "number",
+          "undefined"
+        ],
+        "totalUsd": [
+          "number",
+          "undefined"
+        ],
+        "txHash": [
+          "string",
+          "undefined"
+        ],
+        "type": [
+          "balance-changed",
+          "connected",
+          "smart-account-changed",
+          "submitted"
+        ]
+      }
+    },
+    {
+      "dir": "page->host",
+      "kind": "event",
+      "type": "ready"
+    },
+    {
+      "dir": "page->host",
+      "kind": "event",
+      "type": "ui.state",
+      "shape": {
+        "dismissal": {
+          "message": [
+            "string",
+            "undefined"
+          ],
+          "reason": [
+            "settlement-in-progress",
+            "submission-in-flight",
+            "undefined"
+          ],
+          "state": [
+            "allowed",
+            "blocked"
+          ]
+        },
+        "screen": [
+          "amount",
+          "confirm",
+          "connect",
+          "processing",
+          "select-asset",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "dir": "page->host",
+      "kind": "request",
+      "method": "hello",
+      "shape": {
+        "modalVersion": "string",
+        "protocol": "number"
+      }
+    },
+    {
+      "dir": "page->host",
+      "kind": "request",
+      "method": "host.openUrl",
+      "shape": {
+        "url": "string"
+      }
+    },
+    {
+      "dir": "page->host",
+      "kind": "request",
+      "method": "host.sendTransaction",
+      "shape": {
+        "amount": "string",
+        "chainId": "number",
+        "from": "string",
+        "to": "string",
+        "token": "string"
+      }
+    },
+    {
+      "dir": "page->host",
+      "kind": "request",
+      "method": "host.signRecovery",
+      "shape": {
+        "chainId": "number",
+        "depositId": "string",
+        "destination": "string",
+        "signer": "string"
+      }
+    },
+    {
+      "dir": "page->host",
+      "kind": "request",
+      "method": "wallet.request",
+      "shape": {
+        "chainId": "string",
+        "request": {
+          "method": [
+            "eth_accounts",
+            "eth_chainId",
+            "eth_sendTransaction",
+            "eth_signTypedData_v4",
+            "wallet_sendTransaction",
+            "wallet_switchEthereumChain"
+          ],
+          "params": [
+            "[]",
+            "undefined",
+            [
+              "string"
+            ],
+            [
+              {
+                "chainId": "string"
+              }
+            ],
+            [
+              {
+                "data": "string",
+                "from": "string",
+                "to": "string"
+              }
+            ],
+            [
+              {
+                "from": "string",
+                "to": "string",
+                "value": "string"
+              }
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "dir": "page->host",
+      "kind": "response",
+      "answers": "ui.back",
+      "ok": true,
+      "shape": {
+        "handled": "boolean"
+      }
+    }
+  ]
+}

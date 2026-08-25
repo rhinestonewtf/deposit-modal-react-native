@@ -1,0 +1,478 @@
+/**
+ * Replaying the page's published transcript against this host.
+ *
+ * `protocol.ts` here is a hand-maintained copy of the page's, because a browser
+ * library cannot be a dependency of a React Native app and the Swift and Kotlin
+ * wrappers cannot import one at all. Writing that copy produced the defect the
+ * arrangement predicts — the recovery signing domain transcribed under the wrong
+ * name, which nothing but reading the original would have caught, and which
+ * would have failed at the processor rather than at signing time.
+ *
+ * This is what stops the next one. `conformance/bridge-transcript.json` is the
+ * page's own recording of what crosses the channel; this drives it into the real
+ * host and checks the answers come back in the shape the page expects. A renamed
+ * method, a renamed or retyped field, a changed error code or a changed envelope
+ * fails here rather than on a device.
+ *
+ * It replays shapes rather than literal frames, because the artifact records
+ * shapes: a transcript of one run's addresses and amounts would have to be
+ * regenerated whenever any of them moved, and none of them is contractual.
+ *
+ * The vendored copy is refreshed by `bun run transcript:check`, which is what
+ * notices the page has moved. This file is deliberately offline — a conformance
+ * suite that needs the network fails for reasons that are not drift.
+ */
+import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { createBridgeHost } from "./host";
+import { createPageDouble } from "./test/page-double";
+import {
+  ALLOWED_WALLET_METHODS,
+  BRIDGE_ERROR_DOMAIN,
+  BRIDGE_METHOD,
+  BridgeErrorCode,
+  CAPABILITY,
+  HOST_EVENT,
+  HOST_METHOD,
+  HOST_TO_PAGE_CHANNEL,
+  MAX_FRAME_LENGTH,
+  SIGN_RECOVERY_DOMAIN,
+  SIGN_RECOVERY_DOMAIN_ENCODE_TYPE,
+  SIGN_RECOVERY_ENCODE_TYPE,
+  SIGN_RECOVERY_PRIMARY_TYPE,
+  SIGN_RECOVERY_TYPES,
+  PAGE_EVENT,
+  PAGE_TO_HOST_CHANNEL,
+  PROTOCOL_VERSION,
+  type EmbedConfig,
+  type Envelope,
+  type WalletState,
+} from "./protocol";
+
+type Shape =
+  | "string"
+  | "number"
+  | "boolean"
+  | "null"
+  | "undefined"
+  /** An array that carried no elements. A leaf rather than `[]`, so that
+   *  merging a union never mistakes it for "no alternatives" and drops it —
+   *  which is how every no-argument wallet method lost its params shape. */
+  | "[]"
+  | { [key: string]: Shape }
+  | Shape[];
+
+interface TranscriptFrame {
+  dir: "page->host" | "host->page";
+  kind: "event" | "request" | "response";
+  method?: string;
+  type?: string;
+  answers?: string;
+  ok?: boolean;
+  errorCode?: number;
+  errorDomain?: string;
+  shape?: Shape;
+}
+
+interface Transcript {
+  transcriptFormat: number;
+  modalVersion?: string;
+  vocabulary: {
+    protocol: number;
+    channels: { pageToHost: string; hostToPage: string };
+    maxFrameLength: number;
+    pageMethods: string[];
+    hostMethods: string[];
+    pageEvents: string[];
+    hostEvents: string[];
+    capabilities: string[];
+    walletMethods: string[];
+    errorDomain: string;
+    errorCodes: Record<string, number>;
+    passthroughEvents: string[];
+    signRecovery: {
+      domain: Record<string, string>;
+      types: Record<string, { name: string; type: string }[]>;
+      primaryType: string;
+      encodeType: string;
+      domainEncodeType: string;
+    };
+  };
+  frames: TranscriptFrame[];
+}
+
+/** The format this file knows how to read. A newer artifact must fail loudly
+ *  rather than replay a structure it is guessing at. */
+const SUPPORTED_FORMAT = 1;
+
+const transcript = JSON.parse(
+  readFileSync(
+    resolve(__dirname, "../conformance/bridge-transcript.json"),
+    "utf8",
+  ),
+) as Transcript;
+
+const NONCE = "conformance-nonce";
+
+function isRecord(shape: Shape): shape is { [key: string]: Shape } {
+  return typeof shape === "object" && shape !== null && !Array.isArray(shape);
+}
+
+/**
+ * Values for the leaves the contract constrains by format rather than by type.
+ *
+ * The transcript records `url` as `"string"` because its VALUE is not
+ * contractual — but its format is: the host must refuse anything but `https:`,
+ * and a placeholder would be refused for conformance rather than for drift.
+ * Keyed by field name, since that is what the shape carries.
+ */
+const CONSTRAINED_LEAVES: Record<string, unknown> = {
+  url: "https://pay.example.com/order",
+  to: "0x2222222222222222222222222222222222222222",
+  from: "0x1111111111111111111111111111111111111111",
+  signer: "0x1111111111111111111111111111111111111111",
+  destination: "0x2222222222222222222222222222222222222222",
+  token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  amount: "1000000",
+  depositId: "4242",
+  chainId: 8453,
+};
+
+/**
+ * Build a concrete value the recorded shape describes — the inverse of the
+ * page's `shapeOf`.
+ *
+ * A literal in the shape is vocabulary and is reproduced exactly, which is the
+ * point of recording it as one; a leaf type name becomes a placeholder, since
+ * no value at that position is contractual. A union takes the first alternative
+ * that is not `"undefined"`, so an optional field is exercised present rather
+ * than skipped.
+ */
+function materialize(shape: Shape, key = ""): unknown {
+  if (key in CONSTRAINED_LEAVES && typeof shape === "string") {
+    return CONSTRAINED_LEAVES[key];
+  }
+  if (shape === "string") return "x";
+  if (shape === "number") return 1;
+  if (shape === "boolean") return true;
+  if (shape === "null") return null;
+  if (shape === "undefined") return undefined;
+  if (shape === "[]") return [];
+
+  if (Array.isArray(shape)) {
+    if (shape.length === 0) return [];
+    // A single-element array is an array shape; anything longer is a union of
+    // alternatives, recorded when a field was seen carrying more than one.
+    if (shape.length === 1) return [materialize(shape[0]!, key)];
+    const preferred = shape.find((option) => option !== "undefined") ?? shape[0];
+    return materialize(preferred!, key);
+  }
+
+  if (isRecord(shape)) {
+    const value: Record<string, unknown> = {};
+    for (const [field, entry] of Object.entries(shape)) {
+      const built = materialize(entry, field);
+      if (built !== undefined) value[field] = built;
+    }
+    return value;
+  }
+
+  // A literal, which is vocabulary: a method name, a dismissal reason, a
+  // lifecycle discriminant.
+  return shape;
+}
+
+/** Reduce a value to the same shape vocabulary the artifact uses, so an answer
+ *  can be compared against a recorded one. Only the structure is compared, so
+ *  literals collapse to their type here — the recorded side is what pins a
+ *  vocabulary string, and it is checked separately. */
+function structureOf(value: unknown): Shape {
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (Array.isArray(value)) {
+    return value.length === 0 ? "[]" : [structureOf(value[0])];
+  }
+  if (typeof value === "object") {
+    const record: { [key: string]: Shape } = {};
+    for (const key of Object.keys(value as object).sort()) {
+      const entry = (value as Record<string, unknown>)[key];
+      if (entry === undefined) continue;
+      record[key] = structureOf(entry);
+    }
+    return record;
+  }
+  return typeof value as Shape;
+}
+
+/** Whether the recorded shape says this field may be absent. The page records
+ *  a field seen present in one scenario and absent in another as a union
+ *  carrying `"undefined"`, which is the one fact a native decoder cannot infer
+ *  from a single example. */
+function isOptional(shape: Shape): boolean {
+  return Array.isArray(shape) && shape.length !== 1 && shape.includes("undefined");
+}
+
+/**
+ * The field paths an answer MUST carry.
+ *
+ * Optional subtrees are pruned during the walk rather than filtered afterwards:
+ * an optional field nested inside a required object is still optional, and a
+ * check that only looked at the top level would demand `config.accountAddress`
+ * of a deposit-only session that has no account to name.
+ */
+function requiredPaths(shape: Shape, prefix = ""): string[] {
+  if (isOptional(shape)) return [];
+  if (!isRecord(shape)) return prefix ? [prefix] : [];
+  return Object.entries(shape).flatMap(([key, entry]) =>
+    requiredPaths(entry, prefix ? `${prefix}.${key}` : key),
+  );
+}
+
+const CONFIG: EmbedConfig = {
+  mode: "deposit",
+  backendUrl: "https://proxy.example.com",
+  recipient: "0x1111111111111111111111111111111111111111",
+  targetChain: 8453,
+  targetToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+};
+
+const WALLET: WalletState = {
+  isReady: true,
+  isConnected: true,
+  accounts: [
+    { caip10: "eip155:8453:0x1111111111111111111111111111111111111111" },
+  ],
+  chainId: "eip155:8453",
+  name: "Conformance Wallet",
+};
+
+/** Every handler supplied, so every capability is announced and no method is
+ *  refused for a reason that is not drift. */
+function hostWithEverything() {
+  const page = createPageDouble(NONCE);
+  const host = createBridgeHost({
+    post: page.post,
+    nonce: NONCE,
+    host: { platform: "ios", app: "Conformance", version: "0.0.0" },
+    getConfig: () => CONFIG,
+    getWallet: () => WALLET,
+    getHandlers: () => ({
+      walletRequest: ({ request }) => {
+        switch (request.method) {
+          case "eth_chainId":
+            return "0x2105";
+          case "eth_accounts":
+            return ["0x1111111111111111111111111111111111111111"];
+          case "wallet_switchEthereumChain":
+            return null;
+          case "eth_signTypedData_v4":
+            return `0x${"ab".repeat(65)}`;
+          default:
+            return `0x${"11".repeat(32)}`;
+        }
+      },
+      sendTransaction: () => ({ txHash: `0x${"7a".repeat(32)}` }),
+      signRecovery: () => ({ signature: `0x${"5c".repeat(65)}` }),
+      openUrl: () => {},
+    }),
+  });
+  return { page, host };
+}
+
+describe("the artifact", () => {
+  it("is a format this wrapper can read", () => {
+    expect(transcript.transcriptFormat).toBe(SUPPORTED_FORMAT);
+  });
+});
+
+describe("the vocabulary this wrapper declares", () => {
+  const { vocabulary } = transcript;
+
+  it("speaks the same protocol version", () => {
+    expect(PROTOCOL_VERSION).toBe(vocabulary.protocol);
+  });
+
+  it("installs the channels under the names the page uses", () => {
+    expect(PAGE_TO_HOST_CHANNEL).toBe(vocabulary.channels.pageToHost);
+    expect(HOST_TO_PAGE_CHANNEL).toBe(vocabulary.channels.hostToPage);
+    expect(MAX_FRAME_LENGTH).toBe(vocabulary.maxFrameLength);
+  });
+
+  it("names every method the same way", () => {
+    expect(Object.values(BRIDGE_METHOD).sort()).toEqual(vocabulary.pageMethods);
+    expect(Object.values(HOST_METHOD).sort()).toEqual(vocabulary.hostMethods);
+    expect(Object.values(CAPABILITY).sort()).toEqual(vocabulary.capabilities);
+  });
+
+  it("names every event the same way", () => {
+    expect(Object.values(PAGE_EVENT).sort()).toEqual(vocabulary.pageEvents);
+    expect(Object.values(HOST_EVENT).sort()).toEqual(vocabulary.hostEvents);
+  });
+
+  // The signing surface. A method here the page does not send is one this host
+  // exposes for nothing; one the page sends and this omits refuses the page's
+  // own deposit, and surfaces as "An unknown RPC error occurred" with the
+  // wallet's real message destroyed.
+  it("allows exactly the wallet methods the page sends", () => {
+    expect([...ALLOWED_WALLET_METHODS].sort()).toEqual(vocabulary.walletMethods);
+  });
+
+  // The defect this whole artifact was built for.
+  //
+  // These constants cross no frame — `host.signRecovery` sends the FIELDS, and
+  // each host compiles the struct in — so nothing recorded could ever catch a
+  // wrong transcription of them, which is exactly how the domain was first
+  // written here under the wrong name. The failure is remote and late: the
+  // field array is hashed in declared order, so a wrong domain or a reordered
+  // type derives a different separator and produces a signature that is well
+  // formed, passes locally, and is rejected by the processor.
+  it("compiles the same EIP-712 struct the page publishes", () => {
+    const published = vocabulary.signRecovery;
+    expect(SIGN_RECOVERY_DOMAIN).toEqual(published.domain);
+    expect(SIGN_RECOVERY_PRIMARY_TYPE).toBe(published.primaryType);
+    expect(SIGN_RECOVERY_ENCODE_TYPE).toBe(published.encodeType);
+    expect(SIGN_RECOVERY_DOMAIN_ENCODE_TYPE).toBe(published.domainEncodeType);
+    // Compared as an ordered array, never as a set: the order IS the hash.
+    expect(SIGN_RECOVERY_TYPES).toEqual(published.types);
+  });
+
+  // The domain is the only thing separating a bridge code from a wallet's own,
+  // and a code that disagrees is a valid-looking wrong answer.
+  it("agrees on the error domain and every code", () => {
+    expect(BRIDGE_ERROR_DOMAIN).toBe(vocabulary.errorDomain);
+    for (const [name, code] of Object.entries(vocabulary.errorCodes)) {
+      expect(
+        BridgeErrorCode[name as keyof typeof BridgeErrorCode],
+        `error code ${name}`,
+      ).toBe(code);
+    }
+    expect(Object.keys(BridgeErrorCode).sort()).toEqual(
+      Object.keys(vocabulary.errorCodes).sort(),
+    );
+  });
+});
+
+describe("replaying every recorded page→host request", () => {
+  const requests = transcript.frames.filter(
+    (frame) => frame.dir === "page->host" && frame.kind === "request",
+  );
+
+  it("has requests to replay", () => {
+    expect(requests.length).toBeGreaterThan(0);
+  });
+
+  for (const frame of requests) {
+    it(`answers ${frame.method}`, async () => {
+      const { page, host } = hostWithEverything();
+      const id = `replay-${frame.method}`;
+
+      page.send(host, {
+        kind: "request",
+        id,
+        method: frame.method!,
+        ...(frame.shape === undefined
+          ? {}
+          : { params: materialize(frame.shape) }),
+      } as Envelope);
+
+      // The host answers from a promise chain, never synchronously inside the
+      // page's own call stack — the same rule the page's mock host follows.
+      await vi.waitFor(() =>
+        expect(
+          page.frames.some(
+            (sent) => sent.kind === "response" && sent.id === id,
+          ),
+          `no answer to ${frame.method}`,
+        ).toBe(true),
+      );
+
+      const answer = page.frames.find(
+        (sent): sent is Extract<Envelope, { kind: "response" }> =>
+          sent.kind === "response" && sent.id === id,
+      )!;
+
+      // A 4200 here means this host does not implement a method the page sends,
+      // which is the drift the whole artifact exists to catch — every handler
+      // is supplied above, so nothing legitimately refuses.
+      expect(
+        answer.ok || answer.error.code !== 4200,
+        `${frame.method} was refused as unsupported`,
+      ).toBe(true);
+
+      const recorded = transcript.frames.find(
+        (candidate) =>
+          candidate.dir === "host->page" &&
+          candidate.kind === "response" &&
+          candidate.answers === frame.method &&
+          candidate.ok === true,
+      );
+      if (!recorded?.shape) return;
+
+      expect(answer.ok, `${frame.method} answered with an error`).toBe(true);
+      if (!answer.ok) return;
+
+      // Every field the page expects to read must be present. Compared as
+      // paths, so a host omitting a field the page marked optional passes and
+      // one omitting a required field does not.
+      const actual = new Set(requiredPaths(structureOf(answer.result)));
+      for (const path of requiredPaths(recorded.shape)) {
+        expect(actual, `${frame.method} answered without ${path}`).toContain(
+          path,
+        );
+      }
+    });
+  }
+});
+
+describe("replaying every recorded host→page frame", () => {
+  // The host builds these rather than parsing them, so this is the direction
+  // where a wrapper invents a field name and nothing on the page notices until
+  // the frame is dropped on a device.
+  it("builds hello's answer with every field the page reads", async () => {
+    const { page, host } = hostWithEverything();
+    page.send(host, {
+      kind: "request",
+      id: "hello-1",
+      method: BRIDGE_METHOD.HELLO,
+      params: { protocol: PROTOCOL_VERSION, modalVersion: "0.0.0" },
+    } as Envelope);
+
+    await vi.waitFor(() => expect(page.frames.length).toBeGreaterThan(0));
+    const answer = page.frames.find(
+      (sent): sent is Extract<Envelope, { kind: "response" }> =>
+        sent.kind === "response" && sent.id === "hello-1",
+    );
+    expect(answer?.ok).toBe(true);
+
+    const recorded = transcript.frames.find(
+      (frame) =>
+        frame.dir === "host->page" &&
+        frame.kind === "response" &&
+        frame.answers === BRIDGE_METHOD.HELLO,
+    );
+    const actual = new Set(
+      requiredPaths(structureOf(answer!.ok ? answer!.result : undefined)),
+    );
+    for (const path of requiredPaths(recorded!.shape!)) {
+      // `host.app` and `host.version` are optional on the page's side; the rest
+      // of hello is not.
+      if (path === "host.app" || path === "host.version") continue;
+      expect(actual, `hello answered without ${path}`).toContain(path);
+    }
+  });
+
+  it("emits both host events under the recorded names", () => {
+    const { page, host } = hostWithEverything();
+    host.configure(CONFIG);
+    host.pushWalletState(WALLET);
+
+    const emitted = page.frames
+      .filter((frame) => frame.kind === "event")
+      .map((frame) => frame.type);
+    for (const name of transcript.vocabulary.hostEvents) {
+      expect(emitted, `never emitted ${name}`).toContain(name);
+    }
+  });
+});

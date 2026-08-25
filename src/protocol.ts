@@ -254,17 +254,32 @@ export interface EmbedConfig {
 
 // -- events -----------------------------------------------------------------
 
-export type PageEventType =
-  | "ready"
-  | "lifecycle"
-  | "analytics"
-  | "error"
-  | "ui.state"
-  | "wallet.connectRequested"
-  | "wallet.disconnectRequested"
-  | "dismissRequested";
+/**
+ * Runtime values rather than bare type unions, mirroring the page.
+ *
+ * A name that exists only in the type system is a name the conformance replay
+ * cannot check, which leaves it exactly as unguarded as it was when it lived
+ * only in prose.
+ */
+export const PAGE_EVENT = {
+  READY: "ready",
+  LIFECYCLE: "lifecycle",
+  ANALYTICS: "analytics",
+  ERROR: "error",
+  UI_STATE: "ui.state",
+  WALLET_CONNECT_REQUESTED: "wallet.connectRequested",
+  WALLET_DISCONNECT_REQUESTED: "wallet.disconnectRequested",
+  DISMISS_REQUESTED: "dismissRequested",
+} as const;
 
-export type HostEventType = "session.configure" | "wallet.state";
+export type PageEventType = (typeof PAGE_EVENT)[keyof typeof PAGE_EVENT];
+
+export const HOST_EVENT = {
+  SESSION_CONFIGURE: "session.configure",
+  WALLET_STATE: "wallet.state",
+} as const;
+
+export type HostEventType = (typeof HOST_EVENT)[keyof typeof HOST_EVENT];
 
 export interface DismissRequestedPayload {
   source: "close-button" | "flow-complete" | "back-past-first-screen";
