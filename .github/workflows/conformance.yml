@@ -1,0 +1,33 @@
+name: Conformance freshness
+
+# Whether the PAGE has moved, which is a property of time rather than of a pull
+# request — so it runs on a schedule instead of gating every PR. The PR gate is
+# the offline replay in `bun run test`, which is deterministic and needs no
+# network.
+#
+# A failure here means this wrapper declares a name the page no longer speaks.
+# Additions are reported and do not fail: the contract's discipline is that new
+# fields are optional and a receiver ignores what it does not know, so reddening
+# CI for one would train people to re-vendor without reading the diff.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      origin:
+        description: "Embed origin to check against"
+        required: false
+        default: "https://dev.deposit.rhinestone.dev"
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      # Dev tracks `main` in `deposit-modal`, so a contract change lands here
+      # first. Prod moves once per release.
+      - run: bun run transcript:check ${{ inputs.origin || 'https://dev.deposit.rhinestone.dev' }}
