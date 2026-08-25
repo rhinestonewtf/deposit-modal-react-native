@@ -63,6 +63,9 @@ interface TranscriptFrame {
   answers?: string;
   ok?: boolean;
   errorCode?: number;
+  /** Recorded only on a bridge-specific code; absent means an EIP-1193 or
+   *  JSON-RPC code passed through untranslated. */
+  errorDomain?: string;
   /** The host forwards this payload verbatim rather than reading a field out
    *  of it. */
   passthrough?: boolean;
@@ -427,6 +430,17 @@ for (const frame of vendored.frames ?? []) {
     notes.push(`${key} is no longer recorded`);
     continue;
   }
+  // The domain is the only thing separating a bridge code from a wallet's own,
+  // and it rides the frame rather than keying it — recorded on the
+  // bridge-specific codes and absent on the ones passed through untranslated.
+  // Dropping it means this wrapper answers with an envelope the page no longer
+  // declares, which no shape comparison would reach: an error frame has none.
+  if (frame.errorDomain !== now.errorDomain) {
+    const moved = `${key} errorDomain ${JSON.stringify(frame.errorDomain)} → ${JSON.stringify(now.errorDomain)}`;
+    if (frame.errorDomain === undefined) notes.push(moved);
+    else breaks.push(moved);
+  }
+
   if (frame.shape === undefined) continue;
   if (now.shape === undefined) {
     breaks.push(`${key} no longer records a shape`);
