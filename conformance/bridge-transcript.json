@@ -309,6 +309,8 @@
           "string",
           "undefined"
         ],
+        "funding_method": "string",
+        "modal": "string",
         "pred_balance": "number",
         "receive_token": [
           "string",
@@ -318,6 +320,28 @@
           "string",
           "undefined"
         ],
+        "session_id": "string",
+        "session_properties": {
+          "asset_migration_providers": "[]",
+          "enabled_funding_methods": [
+            "string"
+          ],
+          "fiat_methods": {
+            "source": "backend_resolved"
+          },
+          "gasless_wallet_flow_enabled": "boolean",
+          "initial_asset_migration": "null",
+          "overlay_close_enabled": "boolean",
+          "prefills": {
+            "amount": "boolean",
+            "initial_asset_migration": "boolean",
+            "source_chain": "boolean",
+            "source_token": "boolean"
+          },
+          "presentation": "string",
+          "wallet_integration": "string"
+        },
+        "timestamp": "string",
         "token_balance": [
           "string",
           "undefined"
@@ -335,7 +359,8 @@
           "deposit_modal_connected_wallet_enter_value_open",
           "deposit_modal_connected_wallet_select_source_cta_click",
           "deposit_modal_connected_wallet_select_source_open"
-        ]
+        ],
+        "widget_version": "string"
       }
     },
     {
