@@ -9,12 +9,14 @@
  * re-declare the same thing anyway. Three copies is the shape of the problem,
  * not a shortcut.
  *
- * Nothing yet stops the copies drifting, and discipline is not a plan for four
- * of them. What should: `deposit-modal` publishes the frame sequences its mock
- * host exchanges with the page, and each wrapper replays that transcript in its
- * own CI, so a renamed method or a changed error code fails there rather than
- * on a device. It is not built — RHI-5994 is where it falls out, because this
- * is the wrapper that first has to agree with the page about anything.
+ * Discipline is not a plan for four copies, so what keeps them together is
+ * mechanical: `deposit-modal` publishes what crosses the channel and
+ * `conformance.test.ts` replays it against the real host, so a renamed method,
+ * a renamed or retyped field or a changed error code fails there rather than on
+ * a device.
+ *
+ * That is why a name here is a runtime const with the type derived from it, and
+ * never a bare type union: the replay can only check what it can enumerate.
  *
  * The page's own compatibility rules, restated because this side has to honour
  * them too: an existing field never changes meaning or type, new fields are
@@ -281,8 +283,18 @@ export const HOST_EVENT = {
 
 export type HostEventType = (typeof HOST_EVENT)[keyof typeof HOST_EVENT];
 
+/** Enumerable for the same reason as `BLOCKED_REASON`. */
+export const DISMISS_SOURCE = {
+  CLOSE_BUTTON: "close-button",
+  FLOW_COMPLETE: "flow-complete",
+  BACK_PAST_FIRST_SCREEN: "back-past-first-screen",
+} as const;
+
+export type DismissSource =
+  (typeof DISMISS_SOURCE)[keyof typeof DISMISS_SOURCE];
+
 export interface DismissRequestedPayload {
-  source: "close-button" | "flow-complete" | "back-past-first-screen";
+  source: DismissSource;
 }
 
 /**
@@ -434,11 +446,20 @@ export type DismissalPolicy =
    */
   | { state: "blocked"; reason: BlockedReason; message: string };
 
+/** Enumerable so the conformance replay can check it. A reason is a field this
+ *  host reads, not prose. */
+export const BLOCKED_REASON = {
+  /** A wallet request is outstanding. The app is switched away, and a dismissal
+   *  here destroys the page waiting for the answer. */
+  WALLET_REQUEST_PENDING: "wallet-request-pending",
+  /** Signed or broadcast, hash not yet handed to the backend. */
+  SUBMISSION_IN_FLIGHT: "submission-in-flight",
+  /** The deposit is in flight and the page is tracking it. */
+  SETTLEMENT_IN_PROGRESS: "settlement-in-progress",
+} as const;
+
 export type BlockedReason =
-  | "wallet-request-pending"
-  | "submission-in-flight"
-  | "provider-session-active"
-  | "settlement-in-progress";
+  (typeof BLOCKED_REASON)[keyof typeof BLOCKED_REASON];
 
 export interface UiBackResult {
   /**

@@ -49,6 +49,16 @@
       "wallet_sendTransaction",
       "wallet_switchEthereumChain"
     ],
+    "dismissalReasons": [
+      "settlement-in-progress",
+      "submission-in-flight",
+      "wallet-request-pending"
+    ],
+    "dismissSources": [
+      "back-past-first-screen",
+      "close-button",
+      "flow-complete"
+    ],
     "errorDomain": "bridge",
     "errorCodes": {
       "CHANNEL_CLOSED": 4,
@@ -233,14 +243,51 @@
       "dir": "host->page",
       "kind": "response",
       "answers": "wallet.request",
+      "walletMethod": "eth_accounts",
       "ok": true,
       "shape": [
-        "null",
-        "string",
-        [
-          "string"
-        ]
+        "string"
       ]
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "wallet.request",
+      "walletMethod": "eth_chainId",
+      "ok": true,
+      "shape": "string"
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "wallet.request",
+      "walletMethod": "eth_sendTransaction",
+      "ok": true,
+      "shape": "string"
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "wallet.request",
+      "walletMethod": "eth_signTypedData_v4",
+      "ok": true,
+      "shape": "string"
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "wallet.request",
+      "walletMethod": "wallet_sendTransaction",
+      "ok": true,
+      "shape": "string"
+    },
+    {
+      "dir": "host->page",
+      "kind": "response",
+      "answers": "wallet.request",
+      "walletMethod": "wallet_switchEthereumChain",
+      "ok": true,
+      "shape": "null"
     },
     {
       "dir": "page->host",
@@ -279,6 +326,14 @@
           "deposit_modal_connected_wallet_select_source_cta_click",
           "deposit_modal_connected_wallet_select_source_open"
         ]
+      }
+    },
+    {
+      "dir": "page->host",
+      "kind": "event",
+      "type": "dismissRequested",
+      "shape": {
+        "source": "close-button"
       }
     },
     {

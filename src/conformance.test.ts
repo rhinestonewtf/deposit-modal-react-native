@@ -31,9 +31,11 @@ import { createPageDouble } from "./test/page-double";
 import {
   ALLOWED_WALLET_METHODS,
   BRIDGE_ERROR_DOMAIN,
+  BLOCKED_REASON,
   BRIDGE_METHOD,
   BridgeErrorCode,
   CAPABILITY,
+  DISMISS_SOURCE,
   HOST_EVENT,
   HOST_METHOD,
   HOST_TO_PAGE_CHANNEL,
@@ -98,6 +100,8 @@ interface Transcript {
     walletMethods: string[];
     errorDomain: string;
     errorCodes: Record<string, number>;
+    dismissalReasons: string[];
+    dismissSources: string[];
     passthroughEvents: string[];
     signRecovery: {
       domain: Record<string, string>;
@@ -460,6 +464,20 @@ describe("the vocabulary this wrapper declares", () => {
     expect([...ALLOWED_WALLET_METHODS].sort()).toEqual(vocabulary.walletMethods);
   });
 
+  // `dismissal.reason` and `dismissRequested.source` are fields this host
+  // reads, so both are checkable rather than advisory. Exact equality in both
+  // directions: a reason the page never sends is a branch an integrator writes
+  // that can never run, and one it sends that this omits is typed as something
+  // it is not.
+  it("names every dismissal reason and source the same way", () => {
+    expect(Object.values(BLOCKED_REASON).sort()).toEqual(
+      vocabulary.dismissalReasons,
+    );
+    expect(Object.values(DISMISS_SOURCE).sort()).toEqual(
+      vocabulary.dismissSources,
+    );
+  });
+
   // The defect this whole artifact was built for.
   //
   // These constants cross no frame — `host.signRecovery` sends the FIELDS, and
@@ -517,11 +535,16 @@ describe("replaying every recorded page→host request", () => {
         `${name} was refused as unsupported`,
       ).toBe(true);
 
+      // Matched on the wallet method too: one union across all six results
+      // accepts a string where a send's hash belongs and `null` where an
+      // account list does, and the page's own decoder refuses that — a wrapper
+      // could replay green while stranding a transfer the page cannot read.
       const recorded = transcript.frames.find(
         (candidate) =>
           candidate.dir === "host->page" &&
           candidate.kind === "response" &&
           candidate.answers === frame.method &&
+          candidate.walletMethod === frame.walletMethod &&
           candidate.ok === true,
       );
       if (!recorded?.shape) return;

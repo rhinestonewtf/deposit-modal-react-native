@@ -38,6 +38,8 @@ interface Vocabulary {
   walletMethods: string[];
   errorDomain: string;
   errorCodes: Record<string, number>;
+  dismissalReasons: string[];
+  dismissSources: string[];
   signRecovery?: {
     domain: Record<string, string>;
     types: Record<string, { name: string; type: string }[]>;
@@ -124,6 +126,9 @@ const NAME_LISTS = [
   "hostEvents",
   "capabilities",
   "walletMethods",
+  // Both are fields the host reads out of a payload, not prose.
+  "dismissalReasons",
+  "dismissSources",
 ] as const;
 
 const notes: string[] = [];
@@ -278,12 +283,13 @@ function canonical(shape: Shape): string {
 }
 
 /**
- * A payload the host forwards verbatim reads no discriminant out of, so its
- * vocabulary churning is the product's business rather than this contract's —
- * new analytics events land constantly, and failing on them is what would train
- * people to re-vendor without reading. Everything else the host PARSES.
+ * Nothing inside a payload the host forwards verbatim is this contract's
+ * business: it reads no field and no discriminant out of one, so a telemetry
+ * field or an event name moving is the product's change, and failing on it is
+ * what would train people to re-vendor without reading. Everything else the
+ * host PARSES.
  */
-function vocabularyMoved(message: string, passthrough: boolean): void {
+function breakUnlessForwarded(message: string, passthrough: boolean): void {
   (passthrough ? notes : breaks).push(message);
 }
 
@@ -300,8 +306,9 @@ function diffShape(
     for (const [key, entry] of Object.entries(mine)) {
       const below = path ? `${path}.${key}` : key;
       const now = theirs[key];
-      if (now === undefined) breaks.push(`${where} ${below} is gone`);
-      else diffShape(entry, now, where, below, passthrough);
+      if (now === undefined) {
+        breakUnlessForwarded(`${where} ${below} is gone`, passthrough);
+      } else diffShape(entry, now, where, below, passthrough);
     }
     for (const key of Object.keys(theirs)) {
       if (!(key in mine)) {
@@ -309,6 +316,23 @@ function diffShape(
       }
     }
     return;
+  }
+
+  // The page writes a field it has only ever seen carry one value as a bare
+  // leaf, and the same field as a union the moment a second scenario turns up —
+  // `mode` is `"deposit"` in one recording and `["deposit","withdraw"]` in
+  // another. That is an addition, not a change of kind, so a leaf facing a
+  // union is compared as a union of one. Safe because nothing in this diff
+  // reads a one-element array as "array of", only as a bag of alternatives.
+  if (Array.isArray(mine) !== Array.isArray(theirs)) {
+    if (Array.isArray(theirs) && !isRecord(mine)) {
+      diffShape([mine], theirs, where, path, passthrough);
+      return;
+    }
+    if (Array.isArray(mine) && !isRecord(theirs)) {
+      diffShape(mine, [theirs], where, path, passthrough);
+      return;
+    }
   }
 
   if (Array.isArray(mine) && Array.isArray(theirs)) {
@@ -338,7 +362,7 @@ function diffShape(
         continue;
       }
       const gone = `${at} no longer carries ${canonical(option)}`;
-      if (isLiteral(option)) vocabularyMoved(gone, passthrough);
+      if (isLiteral(option)) breakUnlessForwarded(gone, passthrough);
       else breaks.push(gone);
     }
     for (const option of spare) {
@@ -371,7 +395,7 @@ function diffShape(
     notes.push(`${at} widened from ${canonical(mine)} to ${now}`);
     return;
   }
-  vocabularyMoved(
+  breakUnlessForwarded(
     `${at} changed ${canonical(mine)} → ${canonical(theirs)}`,
     passthrough,
   );

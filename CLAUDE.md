@@ -45,17 +45,19 @@ must never resolve them — and because Swift and Kotlin cannot import it at all
 - **It is the only thing that can catch page-side recovery drift.** The offline
   replay compares `protocol.ts` against the VENDORED copy, so a page that moves
   leaves that copy looking correct until this runs.
-- **A payload literal that disappears is a break unless its frame is
+- **A payload field or literal that disappears is a break, unless its frame is
   `passthrough`.** `host.ts` compares `dismissal.state` against `"allowed"` and
   `"blocked"`, so renaming one drops every `ui.state` frame with no name in any
   vocabulary list changing. The three forwarded events (`analytics`, `error`,
-  `lifecycle`) are exempt — nothing reads a field out of them.
+  `lifecycle`) are wholly exempt — nothing reads a field out of them, so their
+  churn is the product's.
 - It runs on a **schedule**, not per PR (`.github/workflows/conformance.yml`):
   whether the page has moved is a property of time. The PR gate is the offline
   replay, which needs no network.
 - **A name that exists only as a TypeScript type cannot be checked**, so the
   transcript cannot pin it. Add a name to `BRIDGE_METHOD` / `PAGE_EVENT` /
-  `HOST_EVENT` and derive the type from it, never the reverse.
+  `HOST_EVENT` / `BLOCKED_REASON` / `DISMISS_SOURCE` and derive the type from
+  it, never the reverse.
 
 ## Gotchas
 
