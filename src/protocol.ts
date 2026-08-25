@@ -101,6 +101,20 @@ export const BRIDGE_METHOD = {
   /** Page→host: show a payment page outside the web view. Gated by
    *  `CAPABILITY.OPEN_URL`. */
   OPEN_URL: "host.openUrl",
+  /**
+   * Page→host, sent from a SUB-FRAME. Gated by
+   * `CAPABILITY.PROBE_FRAME_SCOPE`.
+   *
+   * The one request this host must never answer. The page sends it from a
+   * frame that is not the main one to find out whether the host acts on
+   * sub-frame traffic — if it does, anything holding a frame in this web view
+   * could drive the wallet the same way, and the page withholds it.
+   *
+   * Nothing implements a handler for it here, and that is the implementation:
+   * `createBridgeHost` drops any frame without the main-frame nonce, so a
+   * sub-frame's copy never reaches the dispatcher at all.
+   */
+  PROBE_FRAME_SCOPE: "bridge.probeFrameScope",
 } as const;
 
 export type BridgeMethod = (typeof BRIDGE_METHOD)[keyof typeof BRIDGE_METHOD];
@@ -118,6 +132,7 @@ export const CAPABILITY = {
   SEND_TRANSACTION: BRIDGE_METHOD.SEND_TRANSACTION,
   SIGN_RECOVERY: BRIDGE_METHOD.SIGN_RECOVERY,
   OPEN_URL: BRIDGE_METHOD.OPEN_URL,
+  PROBE_FRAME_SCOPE: BRIDGE_METHOD.PROBE_FRAME_SCOPE,
 } as const;
 
 export type Capability = (typeof CAPABILITY)[keyof typeof CAPABILITY];
