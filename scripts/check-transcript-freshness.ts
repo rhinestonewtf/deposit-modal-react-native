@@ -408,9 +408,10 @@ function diffShape(
 }
 
 function frameKey(frame: TranscriptFrame): string {
-  const name = frame.walletMethod
-    ? `${frame.method} (${frame.walletMethod})`
-    : (frame.method ?? frame.type ?? frame.answers ?? "");
+  // `answers` is what names a response; `method` is undefined on one, and
+  // reading it first rendered every wallet response as "response to undefined".
+  const named = frame.method ?? frame.type ?? frame.answers ?? "";
+  const name = frame.walletMethod ? `${named} (${frame.walletMethod})` : named;
   if (frame.kind !== "response") return `${frame.dir} ${frame.kind} ${name}`;
   const outcome = frame.ok ? "ok" : `error ${frame.errorCode ?? "?"}`;
   return `${frame.dir} response to ${name} ${outcome}`;
@@ -421,13 +422,40 @@ for (const frame of published.frames ?? []) {
   publishedFrames.set(frameKey(frame), frame);
 }
 
+/** Every name the published page still declares, whatever list it came from. */
+const publishedNames = new Set<string>([
+  ...published.vocabulary.pageMethods,
+  ...published.vocabulary.hostMethods,
+  ...published.vocabulary.pageEvents,
+  ...published.vocabulary.hostEvents,
+  ...published.vocabulary.walletMethods,
+]);
+
 for (const frame of vendored.frames ?? []) {
   const key = frameKey(frame);
   const now = publishedFrames.get(key);
   if (!now) {
-    // Which exchanges the page's scenarios happen to exercise is not the
-    // contract; a name disappearing is, and the vocabulary lists own that.
-    notes.push(`${key} is no longer recorded`);
+    // A recorded exchange is the ONLY coverage for its payload fields and, for
+    // a wallet method, its argument arity: the replay drives what the artifact
+    // records and nothing else. So an exchange vanishing while the page still
+    // declares every name in it silently deletes exactly the checks this file
+    // exists to keep honest — a removal, not fixture churn.
+    //
+    // When the name went with it, the vocabulary lists above have already
+    // broken on that; saying it twice buries the cause.
+    const declared = [
+      frame.method,
+      frame.type,
+      frame.answers,
+      frame.walletMethod,
+    ].filter((name): name is string => name !== undefined);
+    if (declared.every((name) => publishedNames.has(name))) {
+      breaks.push(
+        `${key} is no longer recorded, but the page still declares it — the replay would stop covering it`,
+      );
+    } else {
+      notes.push(`${key} is no longer recorded`);
+    }
     continue;
   }
   // The domain is the only thing separating a bridge code from a wallet's own,

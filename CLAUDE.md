@@ -45,6 +45,15 @@ must never resolve them — and because Swift and Kotlin cannot import it at all
 - **It is the only thing that can catch page-side recovery drift.** The offline
   replay compares `protocol.ts` against the VENDORED copy, so a page that moves
   leaves that copy looking correct until this runs.
+- **A recorded exchange disappearing is a break while the page still declares
+  its name.** The replay drives what the artifact records and nothing else, so a
+  vanished frame silently deletes that method's field and arity coverage. When
+  the name went too, the vocabulary lists have already broken on it.
+- **A wallet method's `request.params` is an index-keyed tuple, because arity is
+  contract there** — a list's length is fixture size, an argument vector's is
+  not. `params: []` stays the `"[]"` leaf so "takes no arguments" is
+  distinguishable from "takes an empty object". `materialize` turns a tuple back
+  into an array; everything else reads it as an ordinary record.
 - **A payload field or literal that disappears is a break, unless its frame is
   `passthrough`.** `host.ts` compares `dismissal.state` against `"allowed"` and
   `"blocked"`, so renaming one drops every `ui.state` frame with no name in any
