@@ -217,6 +217,11 @@ function deriveCapabilities(handlers: BridgeHostHandlers): string[] {
   if (handlers.sendTransaction) capabilities.push(CAPABILITY.SEND_TRANSACTION);
   if (handlers.signRecovery) capabilities.push(CAPABILITY.SIGN_RECOVERY);
   if (handlers.openUrl) capabilities.push(CAPABILITY.OPEN_URL);
+  // Unconditional, and the one capability with no handler behind it. It says
+  // "send me the probe and I will not answer it" — the nonce check in
+  // `receive` is what makes that true, and it is always on. Withholding it
+  // would only stop the page ever finding out.
+  capabilities.push(CAPABILITY.PROBE_FRAME_SCOPE);
   return capabilities;
 }
 
@@ -346,6 +351,16 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
             id,
             await handlers.signRecovery(params as SignRecoveryParams),
           );
+          return;
+        }
+        case BRIDGE_METHOD.PROBE_FRAME_SCOPE: {
+          // Reached only by a frame that carried the nonce, which is only ever
+          // the main one — `receive` drops the rest before the dispatcher sees
+          // them, and that drop is the whole answer the page is looking for.
+          // Answering here is therefore not a contradiction: it says "the
+          // filter let this one through", which for a main-frame probe is
+          // correct and tells the page nothing it did not already know.
+          respond(id, {});
           return;
         }
         case BRIDGE_METHOD.OPEN_URL: {

@@ -152,7 +152,28 @@ describe("capabilities", () => {
     expect(host.capabilities).toEqual([
       CAPABILITY.SEND_TRANSACTION,
       CAPABILITY.OPEN_URL,
+      // Unconditional: it has no handler, and announcing it is what lets the
+      // page send the probe this host is built to ignore.
+      CAPABILITY.PROBE_FRAME_SCOPE,
     ]);
+  });
+
+  it("never answers the frame-scope probe, because it carries no nonce", async () => {
+    const { page, host } = setup();
+    const before = page.frames.length;
+    // Exactly what a sub-frame can do: reach the channel without the nonce
+    // only the main frame was given. Answering would tell the page this host
+    // acts on sub-frame traffic, and cost it the wallet.
+    host.receive(
+      JSON.stringify({
+        kind: "request",
+        id: "probe-1",
+        method: BRIDGE_METHOD.PROBE_FRAME_SCOPE,
+        params: {},
+      }),
+    );
+    await Promise.resolve();
+    expect(page.frames).toHaveLength(before);
   });
 
   it("answers 4200 for a capability the host did not announce", async () => {

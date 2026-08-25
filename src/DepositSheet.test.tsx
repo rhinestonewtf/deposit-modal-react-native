@@ -211,6 +211,7 @@ describe("the handshake", () => {
     expect(result?.capabilities).toEqual([
       CAPABILITY.SEND_TRANSACTION,
       CAPABILITY.OPEN_URL,
+      CAPABILITY.PROBE_FRAME_SCOPE,
     ]);
   });
 
