@@ -513,22 +513,20 @@
         "chainId": "string",
         "request": {
           "method": "eth_sendTransaction",
-          "params": [
-            [
-              {
-                "data": "string",
-                "from": "string",
-                "to": "string"
-              }
-            ],
-            [
-              {
-                "from": "string",
-                "to": "string",
-                "value": "string"
-              }
-            ]
-          ]
+          "params": {
+            "0": {
+              "data": [
+                "string",
+                "undefined"
+              ],
+              "from": "string",
+              "to": "string",
+              "value": [
+                "string",
+                "undefined"
+              ]
+            }
+          }
         }
       }
     },
@@ -541,9 +539,10 @@
         "chainId": "string",
         "request": {
           "method": "eth_signTypedData_v4",
-          "params": [
-            "string"
-          ]
+          "params": {
+            "0": "string",
+            "1": "string"
+          }
         }
       }
     },
@@ -556,13 +555,13 @@
         "chainId": "string",
         "request": {
           "method": "wallet_sendTransaction",
-          "params": [
-            {
+          "params": {
+            "0": {
               "from": "string",
               "to": "string",
               "value": "string"
             }
-          ]
+          }
         }
       }
     },
@@ -575,11 +574,11 @@
         "chainId": "string",
         "request": {
           "method": "wallet_switchEthereumChain",
-          "params": [
-            {
+          "params": {
+            "0": {
               "chainId": "string"
             }
-          ]
+          }
         }
       }
     },

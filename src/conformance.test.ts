@@ -132,6 +132,21 @@ function isRecord(shape: Shape): shape is { [key: string]: Shape } {
 }
 
 /**
+ * Whether a record is a positional tuple — `{"0": …, "1": …}`.
+ *
+ * A JSON-RPC argument vector is not a list. A list is homogeneous and its
+ * length is fixture size, which is why the artifact collapses one to its
+ * element shape; a tuple's length is contract, and `eth_signTypedData_v4`
+ * losing its typed-data argument is drift a wallet fails on. The artifact
+ * records the difference by index-keying the tuple, which reuses the record
+ * construct rather than inventing grammar.
+ */
+function isTuple(shape: { [key: string]: Shape }): boolean {
+  const keys = Object.keys(shape);
+  return keys.length > 0 && keys.every((key, index) => key === String(index));
+}
+
+/**
  * Values for the leaves the contract constrains by format rather than by type.
  *
  * The transcript records `url` as `"string"` because its VALUE is not
@@ -188,6 +203,13 @@ function materialize(shape: Shape, key = ""): unknown {
     return materialize(preferred!, key);
   }
 
+  // Before the record branch: a tuple is an ARRAY on the wire, and handing a
+  // provider `{"0": …}` where it expects `[…]` is a malformed request.
+  if (isRecord(shape) && isTuple(shape)) {
+    const tuple = shape;
+    return Object.keys(tuple).map((index) => materialize(tuple[index]!, key));
+  }
+
   if (isRecord(shape)) {
     const value: Record<string, unknown> = {};
     for (const [field, entry] of Object.entries(shape)) {
@@ -222,6 +244,19 @@ function structureOf(value: unknown): Shape {
     return record;
   }
   return typeof value as Shape;
+}
+
+/** `structureOf`, but an array keeps its arity as an index-keyed record — the
+ *  form the artifact records an argument vector in. Elements go through
+ *  `structureOf`, since nothing nested inside one argument is positional. */
+function tupleOf(value: unknown): Shape {
+  if (!Array.isArray(value)) return structureOf(value);
+  if (value.length === 0) return "[]";
+  const tuple: { [key: string]: Shape } = {};
+  value.forEach((entry, index) => {
+    tuple[String(index)] = structureOf(entry);
+  });
+  return tuple;
 }
 
 /** The names the artifact uses for a leaf. Anything else at a leaf is a
@@ -590,11 +625,14 @@ describe("replaying every recorded page→host request", () => {
 const EIP_1193_PARAMS: Record<string, Shape> = {
   eth_accounts: ["[]", "undefined"],
   eth_chainId: ["[]", "undefined"],
-  eth_sendTransaction: [{ from: "string", to: "string" }],
-  wallet_sendTransaction: [{ from: "string", to: "string" }],
-  wallet_switchEthereumChain: [{ chainId: "string" }],
-  /** `[address, typedDataJson]`, both strings. */
-  eth_signTypedData_v4: ["string"],
+  eth_sendTransaction: { "0": { from: "string", to: "string" } },
+  wallet_sendTransaction: { "0": { from: "string", to: "string" } },
+  wallet_switchEthereumChain: { "0": { chainId: "string" } },
+  /** `[address, typedDataJson]`. Arity is the contract here and the reason
+   *  this table is index-keyed; WHICH of the two is the address is the
+   *  method's own EIP and not ours, so both are `"string"` and the order
+   *  between them is deliberately not pinned. */
+  eth_signTypedData_v4: { "0": "string", "1": "string" },
 };
 
 describe("the request fields handed to the host app", () => {
@@ -664,11 +702,30 @@ describe("the request fields handed to the host app", () => {
       expect(params.request.method).toBe(walletMethod);
 
       // The envelope is not the request. `params` reaches the app's provider
-      // untouched, so a page that renames a field inside it produces a
-      // malformed EIP-1193 call at the wallet and nothing else here would see
-      // it.
+      // untouched, so a page that renames a field inside it — or drops a
+      // positional argument — produces a malformed EIP-1193 call at the wallet,
+      // and nothing else here would see it.
+      const expected = EIP_1193_PARAMS[walletMethod]!;
+
+      // Arity, asserted rather than left to the comparator: a missing position
+      // is the drift with no local symptom at all. `"[]"` is the leaf for a
+      // method that takes NO arguments and is deliberately not an empty tuple,
+      // so only a tuple expectation has an arity to check.
+      if (isRecord(expected) && isTuple(expected)) {
+        const arity = Object.keys(expected).length;
+        const sent = params.request.params;
+        expect(
+          Array.isArray(sent),
+          `${walletMethod}'s params must be a positional array`,
+        ).toBe(true);
+        expect(
+          (sent as unknown[]).length,
+          `${walletMethod} takes ${arity} positional argument(s)`,
+        ).toBe(arity);
+      }
+
       expect(
-        mismatches(structureOf(params.request.params), EIP_1193_PARAMS[walletMethod]!),
+        mismatches(tupleOf(params.request.params), expected),
         `${walletMethod}'s params are not a request a wallet can execute`,
       ).toEqual([]);
     });
