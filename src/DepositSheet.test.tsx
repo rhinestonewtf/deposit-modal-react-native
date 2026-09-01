@@ -306,6 +306,43 @@ describe("a parent re-render", () => {
     vi.useRealTimers();
   });
 
+  // Capabilities settle once at hello, so wallet availability is the thing that
+  // rides `wallet.state`. A host that drops its wallet and pushes nothing
+  // leaves the page rendering the account it last heard about, and the next
+  // wallet action answers 4200 instead of the page falling back to the funding
+  // paths that need no wallet.
+  it("tells the page when the wallet goes away", async () => {
+    const wallet = {
+      state: {
+        isReady: true,
+        isConnected: true,
+        accounts: [{ caip10: `eip155:8453:${RECIPIENT_A}` }],
+        chainId: "eip155:8453",
+      },
+      request: () => "0x2105",
+    };
+    mount({ wallet, onError: () => undefined });
+    const page = loadPage();
+    page.hello();
+    await flush();
+
+    update({ onError: () => undefined });
+    await flush();
+
+    const pushed = page
+      .hostEvents()
+      .filter((frame) => frame.type === "wallet.state");
+    expect(pushed.length).toBeGreaterThan(0);
+    expect(pushed[pushed.length - 1]!.payload).toMatchObject({
+      isConnected: false,
+      accounts: [],
+      chainId: null,
+      // Ready, not "connecting": there is no wallet coming, and the page shows
+      // a spinner where it should show the paths that need none.
+      isReady: true,
+    });
+  });
+
   it("keeps one session, so the page is never asked to handshake twice", async () => {
     mount({ onError: () => undefined });
     const page = loadPage();

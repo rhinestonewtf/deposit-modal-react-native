@@ -95,6 +95,21 @@ export const EMBED_URL_DEV = "https://dev.deposit.rhinestone.dev";
  */
 export const HANDSHAKE_TIMEOUT_MS = 8_000;
 
+/**
+ * What a host with no wallet reports, at hello and whenever one goes away.
+ *
+ * One constant rather than two literals: the page reads this to decide whether
+ * to offer a wallet row at all, and the two moments that produce it — a session
+ * starting without a wallet, and a wallet being cleared mid-session — have to
+ * say exactly the same thing.
+ */
+export const DISCONNECTED_WALLET: WalletState = {
+  isReady: true,
+  isConnected: false,
+  accounts: [],
+  chainId: null,
+};
+
 export interface WalletBridge {
   /** The full snapshot. Push a new object to update the page. */
   state: WalletState;
@@ -325,13 +340,7 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
       nonce,
       host: hostIdentity,
       getConfig: () => configRef.current,
-      getWallet: () =>
-        walletRef.current?.state ?? {
-          isReady: true,
-          isConnected: false,
-          accounts: [],
-          chainId: null,
-        },
+      getWallet: () => walletRef.current?.state ?? DISCONNECTED_WALLET,
       getHandlers: () => handlersRef.current,
       onHello: ({ modalVersion }) => {
         settled = true;
@@ -473,11 +482,22 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
     if (hostRef.current?.connected) hostRef.current.configure(config);
   }, [config]);
 
+  /**
+   * A wallet going away has to be SAID.
+   *
+   * Capabilities settle once at hello, deliberately, so wallet availability is
+   * the thing that rides `wallet.state` — and a host that drops its wallet and
+   * pushes nothing leaves the page rendering the account it last heard about.
+   * The next wallet action then answers 4200 rather than the page falling back
+   * to the funding paths that need no wallet at all.
+   *
+   * Keyed on the wallet's presence as well as its state, or clearing it would
+   * not even re-run this.
+   */
   useEffect(() => {
-    if (wallet && hostRef.current?.connected) {
-      hostRef.current.pushWalletState(wallet.state);
-    }
-  }, [wallet?.state]);
+    if (!hostRef.current?.connected) return;
+    hostRef.current.pushWalletState(wallet?.state ?? DISCONNECTED_WALLET);
+  }, [wallet, wallet?.state]);
 
   useEffect(() => {
     if (!visible || Platform.OS !== "android") return;
