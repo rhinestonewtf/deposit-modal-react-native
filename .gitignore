@@ -4,3 +4,6 @@ dist
 .DS_Store
 example/node_modules
 example/.expo
+.env
+.env.local
+example/.env
