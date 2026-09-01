@@ -14,7 +14,7 @@
  */
 
 /** Written from package.json by `scripts/sync-version.ts` at build. */
-export const WRAPPER_VERSION = "0.0.0";
+export const WRAPPER_VERSION = "0.1.0";
 
 export const VERSION_HEADER = "x-deposit-modal-version";
 
