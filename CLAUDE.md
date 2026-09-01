@@ -68,6 +68,19 @@ must never resolve them — and because Swift and Kotlin cannot import it at all
   `HOST_EVENT` / `BLOCKED_REASON` / `DISMISS_SOURCE` and derive the type from
   it, never the reverse.
 
+## Releasing
+
+- **A push to main opens a Release PR; merging that PR publishes `@latest`.**
+  One branch, no `@dev` channel — the snapshot in `deposit-modal` exists to pin
+  its hosted page to an npm tag, and this package has no hosted artifact.
+- **Publishing is npm trusted publishing over OIDC, and npmjs.com pins the trust
+  to the workflow's FILENAME.** Renaming `.github/workflows/release.yml` fails
+  the publish on authorization, naming nothing.
+- **The wrapper's version is not tied to the page's.** It carries no dependency
+  on `@rhinestone/deposit-modal`, loads the page by URL, and negotiates at the
+  handshake — so a page release changes what an installed wrapper talks to, and
+  `conformance.yml` is what reports that rather than a paired release.
+
 ## Gotchas
 
 - **`vi` is not global here.** Unlike `deposit-modal`, this repo does not set
