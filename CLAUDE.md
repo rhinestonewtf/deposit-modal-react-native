@@ -77,5 +77,12 @@ must never resolve them — and because Swift and Kotlin cannot import it at all
 - **The version literal is checked by CI**, not just written: `src/version.ts`
   must match `package.json`, so a build that skipped `sync-version` fails. The
   header is how a mobile integration is attributed at the processor.
-- The example app's demo wallet **hardcodes Base** and rejects any other chain,
-  so a dev test on another corridor needs that changed, not just config.
+- The example app's demo wallet **rejects any request off its own chain**, so
+  `EXPO_PUBLIC_CHAIN_ID` and `EXPO_PUBLIC_TARGET_CHAIN_ID` have to move together
+  — pointing only the target elsewhere fails at the first signature.
+- **A testnet run cannot reach the wallet.** The processor's portfolio scan is
+  mainnet-only, so faucet funds are invisible and the external-wallet row reads
+  "No balance". Proving the signing seam needs a funded mainnet account.
+- **`idb ui tap` drives the simulator** and needs no Accessibility grant, unlike
+  `osascript` clicking. `pip install fb-idb`; `idb_companion` comes from brew.
+  Coordinates are logical points — screenshot pixels ÷ 3 on a 3x device.

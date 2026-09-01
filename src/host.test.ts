@@ -27,7 +27,7 @@ const CONFIG: EmbedConfig = {
   backendUrl: "https://proxy.example/deposit",
   recipient: "0x2222222222222222222222222222222222222222",
   targetChain: 8453,
-  targetToken: "USDC",
+  targetToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
 };
 
 const WALLET: WalletState = {

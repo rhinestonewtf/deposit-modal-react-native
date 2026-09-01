@@ -16,7 +16,7 @@ import {
   type WalletClient,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { base } from "viem/chains";
+import { base, baseSepolia } from "viem/chains";
 import {
   DepositSheet,
   EMBED_URL_DEV,
@@ -34,6 +34,41 @@ import {
  */
 const DEMO_KEY = process.env.EXPO_PUBLIC_DEMO_PRIVATE_KEY as Hex | undefined;
 
+/**
+ * Base unless asked otherwise. Testnet is the only way to drive a real deposit
+ * without a funded mainnet wallet, and the chain is the wallet's as much as the
+ * deposit's — pointing only the target at a testnet leaves the wallet refusing
+ * every request as off-chain.
+ */
+const CHAIN =
+  process.env.EXPO_PUBLIC_CHAIN_ID === String(baseSepolia.id)
+    ? baseSepolia
+    : base;
+
+/**
+ * Where the deposit lands, which is not where the wallet holds funds. Defaults
+ * to the wallet's chain, so an unset value is a same-chain deposit — real, but
+ * it settles through the intent executor and so proves no bridge.
+ */
+const TARGET_CHAIN_ID = Number(
+  process.env.EXPO_PUBLIC_TARGET_CHAIN_ID ?? CHAIN.id,
+);
+
+/**
+ * An address, never a symbol: the processor rejects an EVM target token that
+ * is not `0x`-prefixed, and the modal reports that 400 as the deposit service
+ * being unavailable — so a symbol here reads as an outage, not a typo.
+ */
+const USDC_BY_CHAIN: Record<number, string> = {
+  8453: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  42161: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+  84532: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  11155420: "0x5fd84259d66Cd46123540766Be93DFE6D43130D7",
+};
+
+const TARGET_TOKEN =
+  process.env.EXPO_PUBLIC_TARGET_TOKEN ?? USDC_BY_CHAIN[TARGET_CHAIN_ID];
+
 const BACKEND_URL =
   process.env.EXPO_PUBLIC_BACKEND_URL ?? "https://your-proxy.example/deposit";
 
@@ -43,15 +78,15 @@ function useDemoWallet(): WalletBridge | undefined {
     const account = privateKeyToAccount(DEMO_KEY);
     const client: WalletClient = createWalletClient({
       account,
-      chain: base,
+      chain: CHAIN,
       transport: http(),
     });
 
     const state: WalletState = {
       isReady: true,
       isConnected: true,
-      accounts: [{ caip10: `eip155:${base.id}:${account.address}` }],
-      chainId: `eip155:${base.id}`,
+      accounts: [{ caip10: `eip155:${CHAIN.id}:${account.address}` }],
+      chainId: `eip155:${CHAIN.id}`,
       name: "Demo Key",
     };
 
@@ -61,11 +96,13 @@ function useDemoWallet(): WalletBridge | undefined {
         // The CAIP-2 chain on the request is authoritative — execute there,
         // rather than wherever the client happens to be pointed.
         if (chainId !== state.chainId) {
-          throw userRejected("This demo wallet only holds a Base account.");
+          throw userRejected(
+            `This demo wallet only holds a ${CHAIN.name} account.`,
+          );
         }
         switch (request.method) {
           case "eth_chainId":
-            return `0x${base.id.toString(16)}`;
+            return `0x${CHAIN.id.toString(16)}`;
           case "eth_accounts":
             return [account.address];
           case "eth_sendTransaction": {
@@ -122,8 +159,8 @@ export default function App() {
             mode: "deposit",
             backendUrl: BACKEND_URL,
             recipient,
-            targetChain: 8453,
-            targetToken: "USDC",
+            targetChain: TARGET_CHAIN_ID,
+            targetToken: TARGET_TOKEN,
             theme: { mode: "system" },
           }
         : undefined,

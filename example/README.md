@@ -18,5 +18,13 @@ that as the deposit service being unavailable.
 `EXPO_PUBLIC_AUTO_OPEN=1` opens the sheet on launch, which is how it is driven
 on a simulator with no way to tap.
 
+`EXPO_PUBLIC_CHAIN_ID=84532` moves the demo wallet to Base Sepolia, and
+`EXPO_PUBLIC_TARGET_CHAIN_ID` sets where the deposit lands (default: the
+wallet's own chain, which is a same-chain deposit and so proves no bridge).
+Both are needed together for a testnet run — the wallet rejects any request off
+its own chain, so pointing only the target at a testnet fails at the first
+signature. Base Sepolia to OP Sepolia is the corridor that settles on dev;
+check `deposit_route_outcome_total` before assuming another one does.
+
 Not built in CI: it needs a simulator, and the contract it exercises is covered
 in Node by the package's own tests.

@@ -18,7 +18,8 @@ import { DepositSheet } from "@rhinestone/deposit-modal-react-native";
     backendUrl: "https://your-proxy.example/deposit",
     recipient: account,
     targetChain: 8453,
-    targetToken: "USDC",
+    // An address, never a symbol — an EVM target rejects "USDC".
+    targetToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   }}
   wallet={{
     state: walletState,
