@@ -33,6 +33,9 @@ must never resolve them — and because Swift and Kotlin cannot import it at all
   field, a changed error code or a changed envelope fails there.
 - **Never hand-edit the vendored transcript.** Refresh it from the page:
   `curl -fsS https://dev.deposit.rhinestone.dev/bridge-transcript.json -o conformance/bridge-transcript.json`.
+  It has to come from a served origin rather than from the `deposit-modal`
+  checkout: `modalVersion` is stamped at page build, so the committed copy there
+  carries none and a vendored copy without one cannot be dated.
 - **Re-vendoring alone is the wrong fix for a red conformance run.** It silences
   the check without changing the wrapper. Fix `src/protocol.ts` to match first.
 - **`bun run transcript:check` compares the vendored copy against what the page
@@ -42,6 +45,11 @@ must never resolve them — and because Swift and Kotlin cannot import it at all
   constants). Additions are reported, because the contract's own rule is that
   new fields are optional and a receiver ignores what it does not know, so
   failing on one would train people to re-vendor without reading.
+- **A break against an origin serving an OLDER `modalVersion` than the vendored
+  copy is a deploy lag, and exits 3 instead** — between a page merging and the
+  origin redeploying, a name it has not shipped yet is indistinguishable from
+  one it dropped. Unorderable versions (a release against a dev snapshot) and a
+  copy with no version get the blunt answer, where a difference is a break.
 - **It is the only thing that can catch page-side recovery drift.** The offline
   replay compares `protocol.ts` against the VENDORED copy, so a page that moves
   leaves that copy looking correct until this runs.

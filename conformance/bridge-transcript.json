@@ -305,18 +305,34 @@
       "type": "analytics",
       "passthrough": true,
       "shape": {
-        "cta_name": [
+        "after_handoff": [
+          "boolean",
+          "undefined"
+        ],
+        "correlator": [
+          "undefined",
+          {
+            "type": "transaction_hash",
+            "value": "string"
+          }
+        ],
+        "entry_source": [
           "string",
           "undefined"
         ],
-        "funding_method": "string",
+        "funding_method": [
+          "null",
+          "string"
+        ],
+        "identifiers": [
+          "undefined",
+          {
+            "integration": "string",
+            "network": "string"
+          }
+        ],
         "modal": "string",
-        "pred_balance": "number",
-        "receive_token": [
-          "string",
-          "undefined"
-        ],
-        "send_token": [
+        "reason": [
           "string",
           "undefined"
         ],
@@ -339,26 +355,27 @@
             "source_token": "boolean"
           },
           "presentation": "string",
+          "target_chain": "string",
+          "target_token": "string",
           "wallet_integration": "string"
         },
+        "source": [
+          "header_button",
+          "undefined"
+        ],
+        "step": [
+          "string",
+          "undefined"
+        ],
         "timestamp": "string",
-        "token_balance": [
-          "string",
-          "undefined"
-        ],
-        "token_name": [
-          "string",
-          "undefined"
-        ],
-        "total_balance_in_external_wallet": [
-          "number",
-          "undefined"
-        ],
         "type": [
-          "deposit_modal_connected_wallet_enter_value_cta_click",
-          "deposit_modal_connected_wallet_enter_value_open",
-          "deposit_modal_connected_wallet_select_source_cta_click",
-          "deposit_modal_connected_wallet_select_source_open"
+          "deposit_modal_close",
+          "deposit_modal_friction",
+          "deposit_modal_handoff",
+          "deposit_modal_method_selected",
+          "deposit_modal_open",
+          "deposit_modal_step_complete",
+          "deposit_modal_step_open"
         ],
         "widget_version": "string"
       }
@@ -632,5 +649,6 @@
         "handled": "boolean"
       }
     }
-  ]
+  ],
+  "modalVersion": "0.0.0-dev-20260901120231"
 }

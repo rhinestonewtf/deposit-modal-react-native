@@ -19,10 +19,19 @@
  * Run against dev by default, because dev tracks `main` and is where a contract
  * change lands first. Prod serves the released contract and moves once per
  * release.
+ *
+ * **A difference is only a break when the origin is not behind us.** In the
+ * window between a page change merging and the origin redeploying, the vendored
+ * copy is ahead of what is served, and every name the page has yet to ship
+ * looks exactly like one it has dropped. `modalVersion` is what separates them:
+ * older on the origin than in the vendored copy means a lag, which exits 3 and
+ * says so rather than telling anyone to edit a correct wrapper.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { originIsBehind } from "./modal-version";
 
 const DEFAULT_ORIGIN = "https://dev.deposit.rhinestone.dev";
 
@@ -477,7 +486,21 @@ for (const frame of vendored.frames ?? []) {
   diffShape(frame.shape, now.shape, key, "", frame.passthrough === true);
 }
 
-console.log(`vendored  ${vendoredPath}`);
+/**
+ * Whether the differences are the deploy being behind rather than the wrapper
+ * being wrong.
+ *
+ * Between a page change merging and the origin redeploying, the vendored copy
+ * is ahead of what is served — so every name the page has not shipped yet reads
+ * as a name it has dropped, and the two are indistinguishable from the shapes
+ * alone. The versions are the only thing that separates them, which is why a
+ * copy vendored without one gets the old, blunter answer.
+ */
+const lagging = originIsBehind(vendored.modalVersion, published.modalVersion);
+
+console.log(
+  `vendored  ${vendoredPath}${vendored.modalVersion ? ` (modal ${vendored.modalVersion})` : ""}`,
+);
 console.log(`published ${url}${published.modalVersion ? ` (modal ${published.modalVersion})` : ""}`);
 
 if (notes.length) {
@@ -487,6 +510,23 @@ if (notes.length) {
     "\nRe-vendor to cover them in the replay:\n" +
       `  curl -fsS ${url} -o conformance/bridge-transcript.json`,
   );
+}
+
+if (breaks.length && lagging) {
+  console.error(
+    `\n${breaks.length} difference(s), and ${origin} is serving an OLDER modal than\n` +
+      "this wrapper vendored — so these are names it has not deployed yet, not\n" +
+      "names it dropped:",
+  );
+  for (const line of breaks) console.error(`  ! ${line}`);
+  console.error(
+    "\nThe wrapper is not wrong here. Do NOT edit `src/protocol.ts` to match:\n" +
+      "re-run once the deploy lands. Still failing hours later means the deploy\n" +
+      "never landed, which is the thing worth chasing.",
+  );
+  // Distinct from a real break so a caller can tell the two apart, and still
+  // non-zero: a deploy that never lands has to end up loud.
+  process.exit(3);
 }
 
 if (breaks.length) {
@@ -500,4 +540,4 @@ if (breaks.length) {
   process.exit(1);
 }
 
-console.log(breaks.length === 0 && notes.length === 0 ? "\nIdentical." : "\nNo breaks.");
+console.log(notes.length === 0 ? "\nIdentical." : "\nNo breaks.");
