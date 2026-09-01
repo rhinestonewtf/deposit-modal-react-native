@@ -96,6 +96,13 @@ jobs:
           version: bun run changeset:version
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Trusted publishing proves who published; provenance proves what was
+          # built and from which commit, and npm attaches it only when the
+          # publish asks. `changeset publish` shells out to `npm publish` and
+          # passes no flags of its own, so the config has to arrive as an
+          # environment variable. Needs the `id-token: write` above, which the
+          # OIDC publish already has.
+          NPM_CONFIG_PROVENANCE: true
 
       - name: Label the Release PR
         # `agent-gate` reports "Awaiting classification" and waits indefinitely
