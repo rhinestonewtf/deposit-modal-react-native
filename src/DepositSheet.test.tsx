@@ -119,7 +119,7 @@ const CONFIG: EmbedConfig = {
   backendUrl: "https://proxy.example/deposit",
   recipient: RECIPIENT_A,
   targetChain: 8453,
-  targetToken: "USDC",
+  targetToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
 };
 
 type Fetches = { url: string }[];
