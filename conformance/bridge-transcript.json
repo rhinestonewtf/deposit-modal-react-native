@@ -462,6 +462,10 @@
       "kind": "event",
       "type": "ui.state",
       "shape": {
+        "contentHeight": [
+          "number",
+          "undefined"
+        ],
         "dismissal": {
           "message": [
             "string",
@@ -486,6 +490,16 @@
           "unknown"
         ]
       }
+    },
+    {
+      "dir": "page->host",
+      "kind": "event",
+      "type": "wallet.connectRequested"
+    },
+    {
+      "dir": "page->host",
+      "kind": "event",
+      "type": "wallet.disconnectRequested"
     },
     {
       "dir": "page->host",
@@ -650,5 +664,5 @@
       }
     }
   ],
-  "modalVersion": "0.0.0-dev-20260901120231"
+  "modalVersion": "0.0.0-dev-20260901125921"
 }
