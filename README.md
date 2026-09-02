@@ -100,6 +100,16 @@ route the page uses and reports terminal deposits through `onDepositSettled`,
 including one that both started and finished while the page was dead. Once the
 process is gone this stops; the modal's history panel covers the reopen.
 
+## The sheet is the height of the flow
+
+The page publishes what it currently needs and the sheet follows it, so a
+one-row screen is not presented at the height of the whole deposit flow. Drag
+the grabber up for full height; a page that publishes no height gets full height
+to begin with.
+
+Nothing to pass — `presentation="fullScreen"` opts out, and an integrator who
+ignores all of this is unaffected.
+
 ## Dismissal is not always yours to grant
 
 The page publishes a dismissal policy, and at a few moments it is `blocked`:
@@ -111,10 +121,11 @@ the lock lifts rather than refused.
 A lock is never open-ended — every request the page blocks on carries its own
 deadline — so this cannot produce a sheet the user is stuck in.
 
-**On iOS the interactive swipe is the exception.** React Native's `Modal` gives
-no way to refuse it, so a `pageSheet` can be swiped away mid-signature. Use
-`presentation="fullScreen"`, which has no swipe, for a build where that matters,
-until this ships a native module that can.
+**The swipe goes through the same policy.** The sheet is drawn here rather than
+presented as a `pageSheet`, whose interactive swipe React Native gives no way to
+refuse — so a drag on the grabber and a tap outside are ours to route, and a
+locked screen cannot be swiped away mid-signature. `presentation="fullScreen"`
+remains available, but it is no longer the way to protect a signature.
 
 ## Development
 
