@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("react-native", async () => {
   const ReactModule = await import("react");
-  const { native } = await import("./test/native-probe");
+  const { native, WINDOW } = await import("./test/native-probe");
   const passthrough = (name: string) =>
     function Passthrough(props: { children?: React.ReactNode }) {
       return ReactModule.createElement(name, null, props.children ?? null);
@@ -40,9 +40,48 @@ vi.mock("react-native", async () => {
     },
     View: passthrough("View"),
     ActivityIndicator: passthrough("ActivityIndicator"),
+    Pressable: function Pressable(props: Record<string, unknown>) {
+      native.sheet.scrimPress = props.onPress as () => void;
+      native.sheet.scrimStyle = props.style;
+      return ReactModule.createElement("Pressable", null, null);
+    },
+    useWindowDimensions: () => WINDOW,
+    // A value that applies a `timing` the instant it starts, so a test reads
+    // where the sheet ends up rather than a frame of the way there.
+    Animated: {
+      Value: class AnimatedValue {
+        value: number;
+        constructor(value: number) {
+          this.value = value;
+        }
+        setValue(next: number) {
+          this.value = next;
+        }
+      },
+      View: function AnimatedView(props: Record<string, unknown>) {
+        native.sheet.props = props;
+        return ReactModule.createElement(
+          "Animated.View",
+          null,
+          props.children as React.ReactNode,
+        );
+      },
+      timing: (value: { setValue(v: number): void }, config: { toValue: number }) => ({
+        start: () => value.setValue(config.toValue),
+      }),
+      spring: (value: { setValue(v: number): void }, config: { toValue: number }) => ({
+        start: () => value.setValue(config.toValue),
+      }),
+    },
+    PanResponder: {
+      create: (config: Record<string, never>) => {
+        native.sheet.pan = config;
+        return { panHandlers: {} };
+      },
+    },
+    // No `absoluteFillObject`, matching React Native 0.86, which removed it.
     StyleSheet: {
       create: <T,>(sheet: T) => sheet,
-      absoluteFillObject: {},
     },
     BackHandler: {
       addEventListener: (_event: string, handler: () => boolean) => {
@@ -100,9 +139,12 @@ vi.mock("react-native-webview", async () => {
 import { DepositSheet, type DepositSheetProps } from "./DepositSheet";
 import { PageWindow } from "./test/page-window";
 import {
+  dragSheet,
   native,
   pressAndroidBack,
   resetNative,
+  sheetHeight,
+  WINDOW,
 } from "./test/native-probe";
 import {
   BRIDGE_METHOD,
@@ -599,5 +641,238 @@ describe("dismissal", () => {
     await flush();
 
     expect(onDismiss).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * The sheet's height, which is the only thing `contentHeight` is for.
+ *
+ * `FULL` is what the sheet presented before the page published a height, and
+ * every case that cannot produce a real one has to land back on it rather than
+ * on zero — a collapsed sheet is a page nobody can reach.
+ */
+const FULL = WINDOW.height - 64;
+
+describe("the sheet's height", () => {
+  const uiState = (contentHeight?: number, screen = "home") => ({
+    screen,
+    dismissal: { state: "allowed" as const },
+    ...(contentHeight === undefined ? {} : { contentHeight }),
+  });
+
+  it("fills the sheet until the page has published a height", async () => {
+    mount();
+    const page = loadPage();
+    page.hello();
+    await flush();
+    expect(sheetHeight()).toBe(FULL);
+
+    // Absent is "nothing laid out to measure", not zero.
+    page.emit("ui.state", uiState());
+    await flush();
+    expect(sheetHeight()).toBe(FULL);
+  });
+
+  it("sizes to the flow, and follows it as the flow navigates", async () => {
+    mount();
+    const page = loadPage();
+    page.hello();
+    await flush();
+
+    page.emit("ui.state", uiState(288));
+    await flush();
+    expect(sheetHeight()).toBe(288);
+
+    page.emit("ui.state", uiState(540, "asset"));
+    await flush();
+    expect(sheetHeight()).toBe(540);
+  });
+
+  it("clamps a flow taller than the screen, and never subtracts from it", async () => {
+    mount();
+    const page = loadPage();
+    page.hello();
+    await flush();
+
+    page.emit("ui.state", uiState(WINDOW.height * 2));
+    await flush();
+    expect(sheetHeight()).toBe(FULL);
+  });
+
+  it("keeps the height it has when a later frame carries none", async () => {
+    mount();
+    const page = loadPage();
+    page.hello();
+    await flush();
+
+    page.emit("ui.state", uiState(288));
+    await flush();
+    // Zero is not a height either — the page says "unmeasurable" by omission.
+    page.emit("ui.state", uiState(0));
+    page.emit("ui.state", uiState());
+    await flush();
+
+    expect(sheetHeight()).toBe(288);
+  });
+
+  it("starts the next session at full height, not the last screen's", async () => {
+    mount();
+    const page = loadPage();
+    page.hello();
+    await flush();
+    page.emit("ui.state", uiState(288));
+    await flush();
+    expect(sheetHeight()).toBe(288);
+
+    update({ visible: false });
+    update({ visible: true });
+    expect(sheetHeight()).toBe(FULL);
+  });
+
+  it("expands to full on a drag up", async () => {
+    mount();
+    const page = loadPage();
+    page.hello();
+    await flush();
+    page.emit("ui.state", uiState(288));
+    await flush();
+
+    act(() => dragSheet(-120));
+    expect(sheetHeight()).toBe(FULL);
+  });
+
+  /**
+   * The scrim has to COVER something, and no assertion about the sheet can
+   * tell whether it does. It was invisible on React Native 0.86 for a whole
+   * round of review — laid out 402x0, painting nothing — because
+   * `StyleSheet.absoluteFillObject` no longer exists there and spreading the
+   * missing export is silent in both TypeScript and the runtime.
+   */
+  it("gives the scrim a real fill rather than a spread of nothing", () => {
+    mount();
+    const style = native.sheet.scrimStyle as Record<string, unknown> | null;
+    expect(style?.position).toBe("absolute");
+    for (const edge of ["top", "left", "right", "bottom"]) {
+      expect(style?.[edge]).toBe(0);
+    }
+  });
+
+  it("draws no sheet at all in fullScreen presentation", () => {
+    mount({ presentation: "fullScreen" });
+    expect(native.sheet.scrimPress).toBeNull();
+    expect(native.modal.props?.transparent).toBe(false);
+    expect(native.modal.props?.presentationStyle).toBe("fullScreen");
+  });
+});
+
+describe("the sheet's own dismissal affordances", () => {
+  it("asks the page before closing on a drag down or a tap outside", async () => {
+    const onDismiss = vi.fn();
+    mount({ onDismiss });
+    const page = loadPage();
+    page.hello();
+    await flush();
+    page.emit("ui.state", {
+      screen: "home",
+      dismissal: { state: "allowed" },
+    });
+    await flush();
+
+    act(() => dragSheet(160));
+    await flush();
+
+    // Back first: a drag down is a navigation before it is an exit, exactly as
+    // Android's back is.
+    const back = page
+      .hostRequests()
+      .find((frame) => frame.method === HOST_METHOD.BACK);
+    expect(back).toBeDefined();
+    expect(onDismiss).not.toHaveBeenCalled();
+
+    page.post({
+      kind: "response",
+      id: back!.id,
+      ok: true,
+      result: { handled: false },
+    });
+    await flush();
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  /**
+   * The reason this sheet is drawn rather than presented. `pageSheet`'s own
+   * interactive swipe cannot be refused from JavaScript, so a signature in
+   * flight could be swiped away along with the only page tracking it.
+   */
+  it("refuses a drag down while the page is locked", async () => {
+    const onDismiss = vi.fn();
+    mount({ onDismiss });
+    const page = loadPage();
+    page.hello();
+    await flush();
+    page.emit("ui.state", {
+      screen: "review",
+      dismissal: {
+        state: "blocked",
+        reason: "wallet-request-pending",
+        message: "Confirm in your wallet",
+      },
+    });
+    await flush();
+
+    act(() => dragSheet(160));
+    await flush();
+    const back = page
+      .hostRequests()
+      .find((frame) => frame.method === HOST_METHOD.BACK);
+    page.post({
+      kind: "response",
+      id: back!.id,
+      ok: true,
+      result: { handled: false },
+    });
+    await flush();
+
+    expect(onDismiss).not.toHaveBeenCalled();
+
+    // And it is held rather than dropped: the lock lifting closes it.
+    page.emit("ui.state", {
+      screen: "success",
+      dismissal: { state: "allowed" },
+    });
+    await flush();
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it("routes a tap outside through the same refusal", async () => {
+    const onDismiss = vi.fn();
+    mount({ onDismiss });
+    const page = loadPage();
+    page.hello();
+    await flush();
+    page.emit("ui.state", {
+      screen: "review",
+      dismissal: {
+        state: "blocked",
+        reason: "submission-in-flight",
+        message: "Finishing up",
+      },
+    });
+    await flush();
+
+    act(() => native.sheet.scrimPress?.());
+    await flush();
+    const back = page
+      .hostRequests()
+      .find((frame) => frame.method === HOST_METHOD.BACK);
+    page.post({
+      kind: "response",
+      id: back!.id,
+      ok: true,
+      result: { handled: false },
+    });
+    await flush();
+
+    expect(onDismiss).not.toHaveBeenCalled();
   });
 });

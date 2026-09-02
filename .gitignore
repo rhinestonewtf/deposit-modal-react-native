@@ -7,3 +7,5 @@ example/.expo
 .env
 .env.local
 example/.env
+example/ios
+example/android
