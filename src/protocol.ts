@@ -446,6 +446,19 @@ export interface UiStatePayload {
    *  payment logic on it. */
   screen: string;
   dismissal: DismissalPolicy;
+  /**
+   * CSS pixels the flow currently needs, for a host sizing a native sheet.
+   *
+   * **Optional in both directions.** Absent whenever the page has nothing laid
+   * out to measure, so a host keeps whatever it was already presenting rather
+   * than treating the first frame carrying it as the start of the flow. A host
+   * that ignores it entirely is unaffected, which is why it needs no
+   * capability.
+   *
+   * It is not a maximum and not a request: the page fills whatever viewport it
+   * is given, and a host free to present at another size stays correct.
+   */
+  contentHeight?: number;
 }
 
 export type DismissalPolicy =

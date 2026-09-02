@@ -17,11 +17,15 @@ import React, {
 } from "react";
 import {
   ActivityIndicator,
+  Animated,
   AppState,
   BackHandler,
   Modal,
+  PanResponder,
   Platform,
+  Pressable,
   StyleSheet,
+  useWindowDimensions,
   View,
 } from "react-native";
 import WebViewClass, {
@@ -109,6 +113,29 @@ export const DISCONNECTED_WALLET: WalletState = {
   accounts: [],
   chainId: null,
 };
+
+/**
+ * How much of the app stays visible above a full-height sheet.
+ *
+ * Approximates the inset iOS leaves at the `.large()` detent, which is what
+ * `presentationStyle="pageSheet"` gave before this sheet was drawn here. Its
+ * job is to keep the scrim visible, so it does not need the safe area to be
+ * exact — and reading that would cost a dependency the package does not have.
+ */
+const SHEET_TOP_GAP = 64;
+
+/** The grabber strip, overlaid on the page rather than stacked above it — the
+ *  page already leaves this space, because iOS draws its own grabber there. */
+const GRABBER_HEIGHT = 24;
+
+/** How far down the grabber must travel before the release is a dismissal
+ *  rather than a slip. */
+const DISMISS_TRAVEL = 88;
+
+/** Snapping to full height, once dragged past this much of the way there. */
+const EXPAND_TRAVEL = 48;
+
+const HEIGHT_ANIMATION_MS = 220;
 
 export interface WalletBridge {
   /** The full snapshot. Push a new object to update the page. */
@@ -209,6 +236,16 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
   // The page's own version, learned at hello. Also the signal that there is a
   // session to poll alongside.
   const [modalVersion, setModalVersion] = useState<string | null>(null);
+
+  /**
+   * What the flow last said it needs, in CSS pixels, and `null` for "present
+   * the way this sheet did before the page published a height".
+   *
+   * Only ever replaced by a POSITIVE height. An absent `contentHeight` means
+   * the page has nothing laid out to measure — never zero — so treating it as
+   * a value would collapse the sheet between two screens.
+   */
+  const [contentHeight, setContentHeight] = useState<number | null>(null);
 
   // One per mount. A reload keeps it: the page is the same document from the
   // channel's point of view, and rotating it would only orphan frames in
@@ -382,6 +419,10 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
             ) {
               dismissNow();
             }
+            const height = state?.contentHeight;
+            if (typeof height === "number" && height > 0) {
+              setContentHeight(height);
+            }
             return;
           }
           case "dismissRequested": {
@@ -432,6 +473,10 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
       host.close();
       hostRef.current = null;
       setModalVersion(null);
+      // Per session: the next one starts on a screen this one knows nothing
+      // about, and opening at the last screen's height would be a sheet sized
+      // for content that is not there yet.
+      setContentHeight(null);
     };
   }, [visible, nonce, hostIdentity, handshakeTimeoutMs]);
 
@@ -528,6 +573,90 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
   }, []);
 
   /**
+   * How tall the sheet is, and the whole of what `contentHeight` buys.
+   *
+   * The reported height is applied VERBATIM, only clamped to a maximum. Never
+   * minus an inset: the page measures its content inside whatever viewport it
+   * has, so a host that subtracted something before applying it would hand back
+   * a smaller viewport, be told a smaller height, and shrink again on every
+   * round until the sheet collapsed.
+   */
+  const { height: windowHeight } = useWindowDimensions();
+  const maxSheetHeight = Math.max(windowHeight - SHEET_TOP_GAP, 0);
+  const targetHeight = Math.min(contentHeight ?? maxSheetHeight, maxSheetHeight);
+
+  const sheetHeight = useRef(new Animated.Value(targetHeight)).current;
+  const dragY = useRef(new Animated.Value(0)).current;
+
+  // Opening is a snap, not an animation: there is nothing on screen yet to
+  // animate from, and the sheet slides in as a whole.
+  useEffect(() => {
+    if (!visible) return;
+    sheetHeight.setValue(targetHeight);
+    dragY.setValue(0);
+    // Deliberately keyed on the session alone. Height changes WITHIN a session
+    // are the effect below, which animates them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    Animated.timing(sheetHeight, {
+      toValue: targetHeight,
+      duration: HEIGHT_ANIMATION_MS,
+      // `height` is not a transform, so it cannot be driven off the JS thread.
+      useNativeDriver: false,
+    }).start();
+  }, [visible, targetHeight, sheetHeight]);
+
+  /**
+   * The grabber's drag, and the reason this sheet is drawn here rather than
+   * presented as a `pageSheet`.
+   *
+   * A downward release goes through `requestDismiss`, so the page gets first
+   * refusal and the dismissal lock is enforceable — which the platform sheet's
+   * own interactive swipe is not from JavaScript. The sheet springs back
+   * regardless: if the close is allowed the parent takes `visible` away, and if
+   * it is refused the sheet is already where it belongs.
+   */
+  const expandRef = useRef<() => void>(() => {});
+  expandRef.current = () => setContentHeight(maxSheetHeight);
+  const dismissRef = useRef<() => void>(() => {});
+  dismissRef.current = () => void requestDismiss();
+
+  const pan = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, gesture) =>
+          Math.abs(gesture.dy) > 4,
+        onPanResponderMove: (_event, gesture) => {
+          // Downward only. Upward travel is a snap on release rather than a
+          // live resize, because growing the sheet grows the page's viewport
+          // and re-laying the flow out on every frame of a drag is worse than
+          // arriving at the new size once.
+          dragY.setValue(Math.max(gesture.dy, 0));
+        },
+        onPanResponderRelease: (_event, gesture) => {
+          if (gesture.dy > DISMISS_TRAVEL) dismissRef.current();
+          else if (gesture.dy < -EXPAND_TRAVEL) expandRef.current();
+          Animated.spring(dragY, {
+            toValue: 0,
+            useNativeDriver: true,
+            bounciness: 0,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(dragY, {
+            toValue: 0,
+            useNativeDriver: true,
+            bounciness: 0,
+          }).start();
+        },
+      }),
+    [dragY],
+  );
+
+  /**
    * The web view is pinned to our origin.
    *
    * A redirect inside the container would otherwise put another document on the
@@ -590,15 +719,46 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
     [embedUrl],
   );
 
+  const sheet = presentation === "sheet";
+
   return (
+    /**
+     * Transparent, because the sheet is drawn here rather than presented.
+     *
+     * `presentationStyle="pageSheet"` is a fixed, near-full-height box with no
+     * detent API reachable from JavaScript, so a one-row screen was presented
+     * at the height of the whole flow. Drawing it costs the scrim and the
+     * spring; it buys the height, and a swipe the dismissal lock can refuse.
+     *
+     * The slide carries the scrim up with it, which a platform sheet would fade
+     * separately. Worth the seam: animating out ourselves would mean holding
+     * the modal mounted past `visible`, and the page behind it is already gone.
+     */
     <Modal
       visible={visible}
       animationType="slide"
-      transparent={false}
-      presentationStyle={presentation === "sheet" ? "pageSheet" : "fullScreen"}
+      transparent={sheet}
+      presentationStyle={sheet ? "overFullScreen" : "fullScreen"}
       onRequestClose={() => void requestDismiss()}
     >
-      <View style={styles.container}>
+      {sheet ? (
+        <Pressable
+          style={styles.scrim}
+          onPress={() => void requestDismiss()}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        />
+      ) : null}
+      <Animated.View
+        style={
+          sheet
+            ? [
+                styles.sheet,
+                { height: sheetHeight, transform: [{ translateY: dragY }] },
+              ]
+            : styles.container
+        }
+      >
         <WebView
           ref={webViewRef}
           source={{ uri: embedUrl }}
@@ -641,7 +801,15 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
             {renderLoading ? renderLoading() : <ActivityIndicator />}
           </View>
         ) : null}
-      </View>
+        {sheet ? (
+          // Overlaid rather than stacked above the web view: the page already
+          // leaves this strip empty, because iOS draws its own grabber there,
+          // and taking the space instead would push every screen down by it.
+          <View style={styles.grabberArea} {...pan.panHandlers}>
+            <View style={styles.grabber} />
+          </View>
+        ) : null}
+      </Animated.View>
     </Modal>
   );
 }
@@ -653,5 +821,37 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
+  },
+  scrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
+  },
+  sheet: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    // The page paints its own background, so clipping the web view to the
+    // radius is what stops its square corners showing through. Android does not
+    // always clip a native child to a parent's radius — the corners read square
+    // there, which is cosmetic and not worth a second view to fix.
+    overflow: "hidden",
+  },
+  grabberArea: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: GRABBER_HEIGHT,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  grabber: {
+    width: 36,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: "rgba(120, 120, 128, 0.4)",
   },
 });
