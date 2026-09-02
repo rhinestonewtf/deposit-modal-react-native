@@ -13,3 +13,8 @@ down and a tap outside both go through `ui.back` and the page's dismissal
 policy, where `pageSheet`'s own interactive swipe could not be refused.
 
 A page that publishes no height presents exactly as before.
+
+Fixed alongside it: the loading overlay was spread from
+`StyleSheet.absoluteFillObject`, which React Native 0.86 removed. Spreading the
+missing export is silent, so it laid out full width and no height and painted
+nothing on that version.

@@ -814,16 +814,35 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
   );
 }
 
+/**
+ * Spelled out rather than `StyleSheet.absoluteFillObject`, which **React Native
+ * 0.86 removed** — only `absoluteFill`, a registered style id that cannot be
+ * spread, survives.
+ *
+ * Spreading the missing export is not an error in TypeScript or at runtime: it
+ * contributes nothing, and the view becomes an ordinary in-flow child. It then
+ * lays out 402x0 — full width, no height — so it renders, reports a layout, and
+ * paints nothing. The scrim was invisible on 0.86 and correct on the 0.73 this
+ * package also supports.
+ */
+const FILL = {
+  position: "absolute",
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+} as const;
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   webView: { flex: 1 },
   loading: {
-    ...StyleSheet.absoluteFillObject,
+    ...FILL,
     alignItems: "center",
     justifyContent: "center",
   },
   scrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...FILL,
     backgroundColor: "rgba(0, 0, 0, 0.4)",
   },
   sheet: {

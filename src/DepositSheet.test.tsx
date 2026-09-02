@@ -42,6 +42,7 @@ vi.mock("react-native", async () => {
     ActivityIndicator: passthrough("ActivityIndicator"),
     Pressable: function Pressable(props: Record<string, unknown>) {
       native.sheet.scrimPress = props.onPress as () => void;
+      native.sheet.scrimStyle = props.style;
       return ReactModule.createElement("Pressable", null, null);
     },
     useWindowDimensions: () => WINDOW,
@@ -78,9 +79,9 @@ vi.mock("react-native", async () => {
         return { panHandlers: {} };
       },
     },
+    // No `absoluteFillObject`, matching React Native 0.86, which removed it.
     StyleSheet: {
       create: <T,>(sheet: T) => sheet,
-      absoluteFillObject: {},
     },
     BackHandler: {
       addEventListener: (_event: string, handler: () => boolean) => {
@@ -738,6 +739,22 @@ describe("the sheet's height", () => {
 
     act(() => dragSheet(-120));
     expect(sheetHeight()).toBe(FULL);
+  });
+
+  /**
+   * The scrim has to COVER something, and no assertion about the sheet can
+   * tell whether it does. It was invisible on React Native 0.86 for a whole
+   * round of review — laid out 402x0, painting nothing — because
+   * `StyleSheet.absoluteFillObject` no longer exists there and spreading the
+   * missing export is silent in both TypeScript and the runtime.
+   */
+  it("gives the scrim a real fill rather than a spread of nothing", () => {
+    mount();
+    const style = native.sheet.scrimStyle as Record<string, unknown> | null;
+    expect(style?.position).toBe("absolute");
+    for (const edge of ["top", "left", "right", "bottom"]) {
+      expect(style?.[edge]).toBe(0);
+    }
   });
 
   it("draws no sheet at all in fullScreen presentation", () => {

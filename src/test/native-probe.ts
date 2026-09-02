@@ -29,6 +29,8 @@ export interface SheetProbe {
   props: Record<string, unknown> | null;
   /** The scrim's `onPress`, as a tap outside the sheet delivers it. */
   scrimPress: (() => void) | null;
+  /** Its resolved style, so a test can assert it actually covers anything. */
+  scrimStyle: unknown;
   pan: Record<string, (event: unknown, gesture: unknown) => unknown> | null;
 }
 
@@ -39,7 +41,7 @@ export const native = {
   platformOS: "ios" as "ios" | "android" | "other",
   webView: { props: null, injected: [], reloads: 0 } as WebViewProbe,
   modal: { props: null } as ModalProbe,
-  sheet: { props: null, scrimPress: null, pan: null } as SheetProbe,
+  sheet: { props: null, scrimPress: null, scrimStyle: null, pan: null } as SheetProbe,
   /** Registered `hardwareBackPress` handlers, newest last. */
   backHandlers: [] as (() => boolean)[],
   /** Registered `AppState` `change` handlers. */
@@ -50,7 +52,7 @@ export function resetNative(platformOS: "ios" | "android" = "ios"): void {
   native.platformOS = platformOS;
   native.webView = { props: null, injected: [], reloads: 0 };
   native.modal = { props: null };
-  native.sheet = { props: null, scrimPress: null, pan: null };
+  native.sheet = { props: null, scrimPress: null, scrimStyle: null, pan: null };
   native.backHandlers = [];
   native.appStateHandlers = [];
 }
