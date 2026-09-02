@@ -64,6 +64,7 @@ import {
   type DepositWatch,
 } from "./deposit-watch";
 import { isSameOrigin, parseHttpsAuthority } from "./origin";
+import { webViewLoadError } from "./load-error";
 import { formatVersionHeader } from "./version";
 import type {
   Caip27Params,
@@ -785,9 +786,12 @@ export function DepositSheet(props: DepositSheetProps): React.JSX.Element {
           onMessage={onMessage}
           onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
           onOpenWindow={onOpenWindow}
-          onError={() =>
-            onFatal?.(new Error("The deposit page could not be loaded."))
-          }
+          // The platform's own description is appended, because without it this
+          // is the least actionable message in the wrapper. A DNS failure, a
+          // TLS failure, an offline device and a proxy refusing the origin all
+          // arrive here identically, and the integrator's only instrument is
+          // whatever `onFatal` is handed.
+          onError={(event) => onFatal?.(webViewLoadError(event))}
           // The page sizes itself to the visual viewport and draws its own
           // safe-area padding; a second inset here would double it.
           contentInsetAdjustmentBehavior="never"
