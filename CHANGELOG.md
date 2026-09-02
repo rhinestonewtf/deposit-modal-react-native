@@ -1,5 +1,33 @@
 # @rhinestone/deposit-modal-react-native
 
+## 0.2.0
+
+### Minor Changes
+
+- 5f3233a: Size the sheet to the flow it is showing. The page publishes a `contentHeight`
+  on `ui.state`, and the sheet is drawn here rather than presented as a
+  `pageSheet` — which is a fixed near-full-height box with no detent API reachable
+  from JavaScript, so a one-row screen was presented at the height of the whole
+  deposit flow.
+
+  Drawing it also makes the dismissal lock enforceable against a swipe: a drag
+  down and a tap outside both go through `ui.back` and the page's dismissal
+  policy, where `pageSheet`'s own interactive swipe could not be refused.
+
+  A page that publishes no height presents exactly as before.
+
+  Fixed alongside it: the loading overlay was spread from
+  `StyleSheet.absoluteFillObject`, which React Native 0.86 removed. Spreading the
+  missing export is silent, so it laid out full width and no height and painted
+  nothing on that version.
+
+### Patch Changes
+
+- df27e96: `onFatal` now carries the web view's own description when the page fails to
+  load, and Android's numeric code with it. Without them a DNS failure, a TLS
+  failure, an offline device and a proxy refusing the origin all arrived as the
+  same sentence, and that sentence is the integrator's only instrument.
+
 ## 0.1.1
 
 ### Patch Changes
