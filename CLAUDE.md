@@ -107,3 +107,24 @@ must never resolve them — and because Swift and Kotlin cannot import it at all
 - **`idb ui tap` drives the simulator** and needs no Accessibility grant, unlike
   `osascript` clicking. `pip install fb-idb`; `idb_companion` comes from brew.
   Coordinates are logical points — screenshot pixels ÷ 3 on a 3x device.
+
+## Running it on Android
+
+- **The emulator does not inherit the Mac's resolver.** It NATs through its own,
+  and the symptom is the page failing to load while ICMP to `8.8.8.8` from the
+  same emulator succeeds. Boot it with `-dns-server 8.8.8.8,1.1.1.1`.
+- **`expo run:android --device` wants the AVD name, not the adb serial**, and
+  reports `Could not find device with name: emulator-5554` for a device `adb
+  devices` lists. With one emulator attached, omit the flag.
+- **`adb shell monkey` silently launches nothing** when the launcher intent is
+  not what it expects. `adb shell am start -n <pkg>/.MainActivity` is reliable.
+- The first build pulls the NDK, CMake and a second platform, so budget ~15
+  minutes before any of the wrapper's own code is even compiled.
+
+## What Android actually exercises that iOS does not
+
+Verified on a `google_apis` Android 15 emulator, WebView 124: the handshake
+completes first try with **no recovery reload**, so the document-start injection
+window is not the race it is feared to be there, and the hardware back closes the
+sheet rather than the app. `target="_blank"` multi-window is still unexercised —
+it needs a provider link, which needs a funded flow.
