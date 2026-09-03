@@ -1,6 +1,6 @@
 {
   "name": "@rhinestone/deposit-modal-react-native",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "React Native wrapper for the Rhinestone deposit modal",
   "author": "Rhinestone <dev@rhinestone.wtf>",
   "type": "module",
