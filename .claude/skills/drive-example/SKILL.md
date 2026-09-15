@@ -25,6 +25,8 @@ Booting, building and `idb` basics are in `CLAUDE.md` and `example/README.md`; t
 - react-native-webview enables WebView debugging only in a debug build (`ReactBuildConfig.DEBUG`), so inspect an `expo run:android` build.
 - `adb shell grep webview_devtools_remote /proc/net/unix` names the socket, then
   `adb forward tcp:9333 localabstract:webview_devtools_remote_<pid>`; `curl -s localhost:9333/json` lists the pages.
+- Attach to the target whose `url` is the embed origin: every web view in the process is listed, including any
+  orphaned `about:blank` popup a `target="_blank"` left behind (see `.claude/rules/webview-links.md`).
 - Connect to the page's `webSocketDebuggerUrl` with the Origin header suppressed (`suppress_origin=True` in Python
   `websocket-client`), or the handshake 403s.
 - `Runtime.evaluate` returns live DOM geometry, which settles "is this our layout?" in one call.
