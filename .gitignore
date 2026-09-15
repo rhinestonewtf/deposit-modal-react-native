@@ -9,3 +9,6 @@ example/.expo
 example/.env
 example/ios
 example/android
+.claude/*
+!.claude/rules/
+!.claude/skills/
