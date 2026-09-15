@@ -126,5 +126,4 @@ must never resolve them — and because Swift and Kotlin cannot import it at all
 Verified on a `google_apis` Android 15 emulator, WebView 124: the handshake
 completes first try with **no recovery reload**, so the document-start injection
 window is not the race it is feared to be there, and the hardware back closes the
-sheet rather than the app. `target="_blank"` multi-window is still unexercised —
-it needs a provider link, which needs a funded flow.
+sheet rather than the app.
