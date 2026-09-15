@@ -98,15 +98,20 @@ must never resolve them — and because Swift and Kotlin cannot import it at all
 - **The version literal is checked by CI**, not just written: `src/version.ts`
   must match `package.json`, so a build that skipped `sync-version` fails. The
   header is how a mobile integration is attributed at the processor.
-- The example app's demo wallet **rejects any request off its own chain**, so
+- The example app's demo wallet, `0x87262957F9a48a36FfAAe3Ec79De67a38F2EFb50` in
+  every wrapper's example, **rejects any request off its own chain**, so
   `EXPO_PUBLIC_CHAIN_ID` and `EXPO_PUBLIC_TARGET_CHAIN_ID` have to move together
   — pointing only the target elsewhere fails at the first signature.
+- **With no chain overrides a run deposits back into the demo wallet**, so repeat
+  runs spend only gas.
 - **A testnet run cannot reach the wallet.** The processor's portfolio scan is
   mainnet-only, so faucet funds are invisible and the external-wallet row reads
   "No balance". Proving the signing seam needs a funded mainnet account.
 - **`idb ui tap` drives the simulator** and needs no Accessibility grant, unlike
   `osascript` clicking. `pip install fb-idb`; `idb_companion` comes from brew.
   Coordinates are logical points — screenshot pixels ÷ 3 on a 3x device.
+- The Kotlin and Swift examples reuse `dev.rhinestone.depositmodal.example`, so
+  installing either on the same device replaces this one.
 
 ## Running it on Android
 
@@ -120,11 +125,31 @@ must never resolve them — and because Swift and Kotlin cannot import it at all
   not what it expects. `adb shell am start -n <pkg>/.MainActivity` is reliable.
 - The first build pulls the NDK, CMake and a second platform, so budget ~15
   minutes before any of the wrapper's own code is even compiled.
+- **Never `adb shell input keyevent 111`** — ESC dismisses the sheet. Hide the IME
+  with its own chevron.
+- **`input tap` on a button that just re-laid out lands as a long press** and opens
+  text selection, so screenshot between taps rather than batching them.
+- **The embed is inspectable over CDP, in a debug build only:** `adb forward tcp:9333
+  localabstract:webview_devtools_remote_<pid>`, the pid from `/proc/net/unix`.
+- **`localhost:9333/json` lists every web view in the process**, including popups a
+  `target="_blank"` orphaned — attach to the one whose `url` is the embed origin.
+- **A CDP websocket client must suppress its Origin header** (`suppress_origin=True`
+  in `websocket-client`), or the handshake 403s.
+- **`Page.captureScreenshot` re-rasters; `adb exec-out screencap` reads the display.**
+  If they disagree the artifact is in the surface, and no page change fixes it.
+- **The emulator composites through SwiftShader**, so confirm a surface artifact on a
+  physical device before chasing it.
+- **`target="_blank"` needs no provider link:** inject an `<a target="_blank">` over
+  CDP and tap it — it takes the same `onOpenWindow` path as the explorer links.
+- **`host.openUrl` needs no deposit:** set `enableFiatOnramp: true` in the example's
+  `config` and tap a Cash method; logcat shows the `android.intent.action.VIEW`.
 
 ## What Android actually exercises that iOS does not
 
 Verified on a `google_apis` Android 15 emulator, WebView 124: the handshake
 completes first try with **no recovery reload**, so the document-start injection
 window is not the race it is feared to be there, and the hardware back closes the
-sheet rather than the app. `target="_blank"` multi-window is still unexercised —
-it needs a provider link, which needs a funded flow.
+sheet rather than the app.
+
+**Each `target="_blank"` orphans an `about:blank` web view past the sheet** —
+react-native-webview never destroys its popup, and `onOpenWindow` cannot reach it.
